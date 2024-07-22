@@ -1,0 +1,61 @@
+{
+  "token": "",
+  "tokenTG": "",
+  "tokenBS": "",
+  "prefix": "!",
+  "adminID": "",
+  "guildId": "",
+  "clientId": "",
+  "cfg": {
+    "intents": [
+      "GUILDS",
+      "GUILD_BANS",
+      "GUILD_EMOJIS_AND_STICKERS",
+      "GUILD_INTEGRATIONS",
+      "GUILD_WEBHOOKS",
+      "GUILD_INVITES",
+      "GUILD_VOICE_STATES",
+      "GUILD_MESSAGES",
+      "GUILD_MESSAGE_REACTIONS",
+      "GUILD_MESSAGE_TYPING",
+      "DIRECT_MESSAGES",
+      "DIRECT_MESSAGE_REACTIONS",
+      "DIRECT_MESSAGE_TYPING"
+    ]
+  },
+  "dockerfile": {
+    "baseImage": "node:18",
+    "workdir": "/usr/src/app",
+    "scripts": {
+      "test": "echo \"Error: no test specified\" && exit 1"
+    },
+    "dependencies": {
+      "@discordjs/rest": "^2.0.1",
+      "@discordjs/voice": "^0.16.0",
+      "@google-cloud/dialogflow": "^5.5.1",
+      "@google-cloud/translate": "^8.1.0",
+      "axios": "^1.6.2",
+      "brain.js": "^2.0.0-beta.23",
+      "canvas": "^2.10.2",
+      "discord.js": "^13.17.1",
+      "dotenv": "^16.3.1",
+      "exec": "^0.2.1",
+      "ffmpeg-static": "^5.2.0",
+      "fluent-ffmpeg": "^2.1.2",
+      "fs": "^0.0.1-security",
+      "google-gax": "^3.5.7",
+      "google-translate-api": "^2.3.0",
+      "https": "^1.0.0",
+      "install": "^0.13.0",
+      "mongoose": "^6.0.13",
+      "node-fetch": "^3.3.2",
+      "node-telegram-bot-api": "^0.63.0",
+      "npm": "^10.2.0",
+      "openai": "^4.12.4",
+      "regression": "^2.0.1",
+      "simple-discord.db": "^0.1.0",
+      "simple-linear-regression": "^1.0.3",
+      "translate-google": "^1.5.0"
+    }
+  }
+}
