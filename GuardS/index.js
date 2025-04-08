@@ -1,74 +1,102 @@
-// const { Configuration, OpenAIApi } = require("openai");
 const fs = require('fs');
 const https = require('https');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
 const { SlashCommandBuilder } = require('@discordjs/builders');
-const { createCanvas, loadImage } = require('canvas');
 
 
 process.env.NTBA_FIX_319 = 1;
 process.env.NTBA_FIX_350 = 0;
 
-const { Client, Intents, Collection, DiscordAPIError, MessageEmbed, Message, GatewayIntentBits, CommandInteractionOptionResolver} = require('discord.js');
+const { Client, Intents, Collection, DiscordAPIError, EmbedBuilder, Message, GatewayIntentBits, CommandInteractionOptionResolver} = require('discord.js');
 const client = new Client({ intents: [
-  Intents.FLAGS.GUILDS,
-  Intents.FLAGS.GUILD_MEMBERS,
-  Intents.FLAGS.GUILD_MESSAGES,
-  Intents.FLAGS.GUILD_MESSAGE_REACTIONS,
-  Intents.FLAGS.DIRECT_MESSAGES,
-  Intents.FLAGS.DIRECT_MESSAGE_REACTIONS,
-  Intents.FLAGS.DIRECT_MESSAGE_TYPING,
-  Intents.FLAGS.DIRECT_MESSAGES] 
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildMembers,
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.MessageContent,
+  GatewayIntentBits.GuildMessageReactions,
+  GatewayIntentBits.DirectMessages,
+  GatewayIntentBits.DirectMessageReactions,
+  GatewayIntentBits.DirectMessageTyping] 
  });
 
  client.setMaxListeners(20); // количество слушателей
 
 config = require('./config.json');
 
-
-const Discord = require('discord.js');
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
-const translate = require('translate-google');
 
 
-const discordToken = config.token;
+const discordToken = config.tokenDS;
 const telegramToken = config.tokenTG;
 
 
-const rest = new REST({ version: '9' }).setToken(discordToken);
+const rest = new REST({ version: '10' }).setToken(discordToken);
 
-(async () => {
-    try {
-        console.log('Started refreshing application (/) commands.');
+// Определение новых команд
+// const commands = [
+//   new SlashCommandBuilder()
+//     .setName('link')
+//     .setDescription('Link a Discord channel to a Telegram chat')
+//     .addChannelOption(option =>
+//       option.setName('discord_channel')
+//         .setDescription('Выберите канал Discord')
+//         .setRequired(true)
+//         .addChannelTypes(0)  // Только текстовые каналы
+//     )
+//     .addStringOption(option =>
+//       option.setName('telegram_chat_id')
+//         .setDescription('ID чата Telegram')
+//         .setRequired(true)
+//     ),
 
-        // Очистка существующих команд
-        await rest.put(
-            Routes.applicationGuildCommands(clientId, guildId),
-            { body: [] }
-        );
+//   new SlashCommandBuilder()
+//     .setName('sendmess')
+//     .setDescription('Send a message to a specified user')
+//     .addStringOption(option =>
+//       option.setName('user_id')
+//         .setDescription('ID пользователя для отправки сообщения')
+//         .setRequired(true)
+//     )
+//     .addStringOption(option =>
+//       option.setName('message')
+//         .setDescription('Сообщение для отправки')
+//         .setRequired(true)
+//     ),
 
-        // Регистрация новых команд
-        await rest.put(
-            Routes.applicationGuildCommands(clientId, guildId),
-            { body: commands }
-        );
+//     new SlashCommandBuilder()
+//     .setName('re')
+//     .setDescription('Ответить на сообщение')
+//     .addStringOption(option =>
+//       option.setName('message')
+//         .setDescription('Текст ответа')
+//         .setRequired(true)
+//     )
 
-        console.log('Successfully reloaded application (/) commands.');
-    } catch (error) {
-        console.error(error);
-    }
-  })
+// ];
+// Когда бот готов, выполняем регистрацию команд
+// client.once('ready', async () => {
+//   try {
+//     console.log('Started refreshing application (/) commands.');
 
-const { getClanInfo } = require('./brawl/brawl');  // Перевод часть кода в другой файл(бравл старс)
+//     // Очистка существующих команд для всего бота
+//     await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+//     console.log('Successfully cleared existing application (/) commands.');
+
+//     // Регистрация новых команд для всего бота
+//     await rest.put(Routes.applicationCommands(client.user.id), { body: commands.map(command => command.toJSON()) });
+//     console.log('Successfully reloaded application (/) commands.');
+//   } catch (error) {
+//     console.error('Error during commands refresh:', error);
+//   }
+//   });
 
 
 const telegramBot = new TelegramBot(telegramToken, { polling: true });
 
 //ДИСКОРД СОЕДИНЕНИЕ
 const channelMappings = {};
-let targetLanguage; // Теперь язык по умолчанию не устанавливается заранее
 
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isCommand()) return;
@@ -93,35 +121,18 @@ client.on('interactionCreate', async (interaction) => {
 
     channelMappings[discordChannel.id] = telegramChatId;
 
-    const embed = new MessageEmbed()
+    const embed = new EmbedBuilder()
       .setTitle('Связь установлена')
       .setDescription(`Канал ${discordChannel.name} связан с чатом Telegram ${telegramChatId}`)
       .setColor('#00FF00');
 
     await interaction.reply({ embeds: [embed] });
-  } else if (commandName === 'lang') {
-    const newLang = interaction.options.getString('language');
-    if (newLang) {
-      targetLanguage = newLang;
-      await interaction.reply(`Язык перевода успешно изменен на ${newLang}`);
-    } else {
-      await interaction.reply('Ошибка: необходимо указать целевой язык перевода.');
-    }
-  } else if (commandName === 'brawl') {
-    try {
-      const channel = interaction.channel;
-      await getClanInfo(channel);
-    } catch (error) {
-      console.error('Произошла ошибка:', error.message);
-      await interaction.reply('Произошла ошибка при получении информации о клане.');
-    }
-  }
+  } 
 });
 
 
 
 const ffmpeg = require('fluent-ffmpeg');
-
 const { exec } = require('child_process');
 
 
@@ -135,7 +146,6 @@ client.on('messageCreate', async (message) => {
 
   const channelId = message.channel.id;
   const telegramChatId = channelMappings[channelId];
-  const chatId = telegramChatId || message.chat.id;
 
   if (telegramChatId) {
     let messageContent = `[${message.author.username}] ${message.content}`;
@@ -146,26 +156,6 @@ client.on('messageCreate', async (message) => {
       const repliedMessageContent = `[${repliedMessage.author.username}] ${repliedMessage.content}`;
       messageContent = `\n> ${repliedMessageContent}: \n${messageContent}`;
     }
-
-    // Проверяем, установлен ли целевой язык
-    if (targetLanguage) {
-      const text = message.content;
-      const russianWords = text.match(/[а-яА-ЯЁё]+/g);
-      if (russianWords) {
-          try {
-              const translations = await Promise.all(russianWords.map(word => translate(word, { to: targetLanguage })));
-              russianWords.forEach((word, index) => {
-                  // Формуємо рядок в форматі "EN: переклад - оригінал"
-                  const translatedWord = `${targetLanguage.toUpperCase()}: ${translations[index]} - ${word}`;
-                  // Замінюємо російські слова на переклад з вказанням мови та оригінальним словом
-                  messageContent = messageContent.replace(new RegExp(word, 'g'), translatedWord);
-              });
-          } catch (error) {
-              console.error('Помилка при перекладі:', error);
-          }
-      }
-  }
-    
 
     // Отправка уведомлений из дс в телеграмм
     if (messageContent) {
@@ -331,7 +321,7 @@ telegramBot.onText(/\/link/, async (msg) => {
       // Установка связи между каналами
       channelMappings[discordChannel.id] = telegramChatId;
 
-      const embed = new MessageEmbed()
+      const embed = new EmbedBuilder()
         .setTitle('Связь установлена')
         .setDescription(`Канал Discord ${discordChannel} связан с каналом Telegram ${telegramChatId}`)
         .setColor('#00FF00');
@@ -403,22 +393,14 @@ telegramBot.on('message', async (msg) => {
         const outputFilePath = inputFilePath.replace('.oga', '.mp3');
         const fileStream = fs.createWriteStream(inputFilePath);
 
-        // Сохранение вложения на диск
-        const response = await axios({
-          url: fileLink,
-          method: 'GET',
-          responseType: 'stream'
-        });
-        response.data.pipe(fileStream);
-
         fileStream.on('finish', () => {
-          // Конвертация файла из OGA в MP3
+          // Convert "oga" to "mp3"
           ffmpeg(inputFilePath)
             .toFormat('mp3')
             .on('end', () => {
               console.log('Конвертация завершена.');
               // Отправка сконвертированного файла в Discord
-              const convertedFileStream = fs.createReadStream(outputFilePath);
+              const convertedFileStream = outputFilePath;
               // Отправляем файл
               discordChannel.send({
                 content: messageText,
@@ -444,322 +426,11 @@ telegramBot.on('message', async (msg) => {
 });
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Обработчик сообщений Telegram
-// telegramBot.on('message', async (msg) => {
-//   const chatId = msg.chat.id;
-//   const text = msg.text;
-
-//   // Перевіряємо, чи існує текстовий зміст у повідомленні
-//   if (!text) {
-//     console.log('Повідомлення не містить тексту');
-//     return;
-//   }
-
-//   // Перевіряємо, чи повідомлення починається зі слеш-команди "/lang"
-//   if (text.startsWith('/lang')) {
-//     // Отримуємо мовний параметр з команди
-//     const langCommand = text.substring(6).trim().toLowerCase(); // Видаляємо "/lang" та зайві пробіли
-
-//     // Перевіряємо валідність мови
-//     if (langCommand === 'ru' || langCommand === 'en') {
-//       // Встановлюємо цільову мову
-//       targetLanguage = langCommand;
-//       await telegramBot.sendMessage(chatId, `Мова встановлена на ${targetLanguage === 'ru' ? 'русский' : 'англійський'}.`);
-//     } else {
-//       await telegramBot.sendMessage(chatId, 'Допустимі значення мови: ru (русский), en (англійський).');
-//     }
-//     return; // Завершуємо виконання обробника
-//   }
-
-//   // Перевіряємо, чи існує цільова мова
-//   if (!targetLanguage) {
-//     return; // Завершуємо виконання обробника
-//   }
-
-//   // Перевіряємо, чи текст містить російські слова
-//   const russianWords = text.match(/[а-яА-ЯЁё]+/g);
-//   if (russianWords) {
-//     try {
-//       // Перекладаємо російські слова на вказану мову
-//       const translations = await Promise.all(russianWords.map(word => translate(word, { to: targetLanguage })));
-
-//       // Замінюємо російські слова у тексті на їх переклад
-//       const translatedText = text.replace(/[а-яА-ЯЁё]+/g, (match, offset) => {
-//         const index = russianWords.indexOf(match);
-//         return `> ${targetLanguage.toUpperCase()}: ${translations[index]}`;
-//       });
-
-//       // Відправляємо перекладений текст у Discord
-//       const discordChannelId = Object.keys(channelMappings).find(
-//         (channelId) => channelMappings[channelId] === msg.chat.id.toString()
-//       );
-//       if (discordChannelId) {
-//         const discordChannel = client.channels.cache.get(discordChannelId);
-//         if (discordChannel) {
-//           discordChannel.send(translatedText);
-//         }
-//       }
-//     } catch (error) {
-//       console.error('Помилка при перекладі:', error);
-//     }
-//   }
-// });
-
-telegramBot.on('message', async (msg) => {
-  const chatId = msg.chat.id;
-  const text = msg.text;
-
-  // Перевіряємо, чи існує текстовий зміст у повідомленні
-  if (!text) {
-    console.log('Повідомлення не містить тексту');
-    return;
-  }
-
-  // Перевіряємо, чи повідомлення починається зі слеш-команди "/lang"
-  if (text.startsWith('/lang')) {
-    // Отримуємо мовний параметр з команди
-    const langCommand = text.substring(6).trim().toLowerCase(); // Видаляємо "/lang" та зайві пробіли
-
-    // Перевіряємо валідність мови
-    if (langCommand === 'ru' || langCommand === 'en' || langCommand === 'ua' || langCommand === 'uk') {
-      // Встановлюємо цільову мову
-      targetLanguage = langCommand;
-      await telegramBot.sendMessage(chatId, `Мова встановлена на ${targetLanguage === 'ru' ? 'російську' : targetLanguage === 'en' ? 'англійську' : 'українську'}.`);
-    } else {
-      await telegramBot.sendMessage(chatId, 'Допустимі значення мови: ru (російська), en (англійська), ua/uk (українська).');
-    }
-    return; // Завершуємо виконання обробника
-  }
-
-  // Перевіряємо, чи існує цільова мова
-  if (!targetLanguage) {
-    return; // Завершуємо виконання обробника
-  }
-
-  // Перевіряємо, чи текст містить російські або українські слова
-  const russianWords = text.match(/[а-яА-ЯЁё]+/g);
-  const ukrainianWords = text.match(/[а-яєіїґ]+/ig);
-  const allWords = [...new Set([...(russianWords || []), ...(ukrainianWords || [])])]; // Об'єднуємо російські та українські слова
-
-  if (allWords.length > 0) {
-    try {
-      // Перекладаємо слова на вказану мову
-      const translations = await Promise.all(allWords.map(word => translate(word, { to: targetLanguage })));
-
-      // Замінюємо слова у тексті на їх переклад
-      let translatedText = text;
-      allWords.forEach((word, index) => {
-        // Формуємо рядок в форматі "EN: переклад - оригінал"
-        const translatedWord = `> ${targetLanguage.toUpperCase()}: ${translations[index]} (${word})`; // Додаємо оригінальне слово у дужках
-        // Замінюємо слова на їх переклад з вказанням мови та оригінального слова
-        translatedText = translatedText.replace(new RegExp(word, 'g'), translatedWord);
-      });
-
-      // Відправляємо перекладений текст у Discord
-      const discordChannelId = Object.keys(channelMappings).find(
-        (channelId) => channelMappings[channelId] === msg.chat.id.toString()
-      );
-      if (discordChannelId) {
-        const discordChannel = client.channels.cache.get(discordChannelId);
-        if (discordChannel) {
-          discordChannel.send(translatedText);
-        }
-      }
-    } catch (error) {
-      console.error('Помилка при перекладі:', error);
-    }
-  }
-});
-
-
-client.on('messagecreate', async message => {
-  // Проверяем, содержит ли сообщение стикер
-
-  if (message.stickers.size > 0) {
-      let sticker = message.stickers.first();
-      let response = await fetch(sticker.url);
-      let buffer = await response.buffer();
-      
-      // Отправляем стикер в Telegram
-      telegramBot.sendSticker(telegramToken, buffer).then(() => {
-          console.log('Sticker sent to Telegram');
-      }).catch(console.error);
-  }
-});
-
-
-// const getDiscordChannelId = (telegramChatId) => {
-//   return Object.keys(channelMappings).find(
-//     (channelId) => channelMappings[channelId] === telegramChatId.toString()
-//   );
-// };
-
-// // Обработчик событий Discord для отправки стикеров и эмодзи в Telegram
-// client.on('messageCreate', async (message) => {
-//   if (message.author.bot) return;
-//   if (!message.attachments.size && !message.content.includes(':')) return;
-
-//   const telegramChatId = channelMappings[message.channel.id];
-//   if (!telegramChatId) return;
-
-//   // Отправка анимированных стикеров
-//   message.attachments.forEach((attachment) => {
-//     // Проверяем, что вложение - это анимированный стикер
-//     if (attachment.url.endsWith('.gif')) {
-//       // Отправляем анимированный стикер в Telegram
-//       telegramBot.sendAnimation(telegramChatId, attachment.url)
-//         .catch((error) => {
-//           console.error('Ошибка при отправке анимации в Telegram:', error.message);
-//         });
-//     }
-//   });
-
-//   // Отправка кастомных эмодзи
-//   const customEmojiRegex = /<a?:\w+:(\d+)>/g;
-//   let match;
-//   while ((match = customEmojiRegex.exec(message.content)) !== null) {
-//     const emojiId = match[1];
-//     const emojiUrl = `https://cdn.discordapp.com/emojis/${emojiId}.gif?v=1`;
-//     // Отправляем кастомное эмодзи в Telegram
-//     telegramBot.sendSticker(telegramChatId, emojiUrl)
-//       .catch((error) => {
-//         console.error('Ошибка при отправке эмодзи в Telegram:', error.message);
-//       });
-//   }
-// });
-
-// // Обработчик событий Telegram для получения сообщений
-// telegramBot.on('message', async (msg) => {
-//   const discordChannelId = getDiscordChannelId(msg.chat.id);
-//   if (!discordChannelId) return;
-
-//   // Проверяем, содержит ли сообщение кастомные эмодзи
-//   if (msg.text && msg.text.match(/<a?:\w+:\d+>/g)) {
-//     // Получаем все кастомные эмодзи из сообщения
-//     const customEmojis = msg.text.match(/<a?:\w+:\d+>/g);
-
-//     // Отправляем каждое эмодзи в Discord
-//     customEmojis.forEach(async (customEmoji) => {
-//       try {
-//         // Получаем ID эмодзи из текста
-//         const emojiId = customEmoji.match(/\d+/)[0];
-//         // Создаем ссылку на эмодзи
-//         const emojiUrl = `https://cdn.discordapp.com/emojis/${emojiId}.jpeg`;
-//         // Отправляем эмодзи в Discord канал
-//         const fileStream = request(emojiUrl);
-//         fileStream.on('error', function(err) {
-//           console.error('Ошибка при чтении файла:', err);
-//         });
-//         // Отправляем файл в Discord канал
-//         discordClient.channels.cache.get(discordChannelId).send({
-//           files: [fileStream],
-//         });
-//       } catch (error) {
-//         console.error('Ошибка при отправке эмодзи в Discord:', error.message);
-//       }
-//     });
-//   }
-// });
-
-// // Обработка ошибок
-// client.on('error', console.error);
-// telegramBot.on('error', console.error);
-
-// // Обработка ошибок
-// client.on('error', console.error);
-// telegramBot.on('error', console.error);
-
-
-
-
-
-
-
-
-
-
-
 // Заdумка, крч когdа ты в голосовом мог записать голосовое увеdомление в течении 10 секунd
-
-// client.on('messageCreate', async message => {
-//   if (!message.guild) return;
-//   if (message.content.startsWith('!sendvoice')) { // команда для отправки голосового сообщения
-//     const voiceChannel = message.member?.voice.channel; // получаем голосовой канал пользователя
-
-//     if (!voiceChannel) {
-//       return message.reply('Вы должны быть в голосовом канале, чтобы отправить голосовое сообщение!');
-//     }
-
-//     try {
-//       const connection = await voiceChannel.join();
-//       const dispatcher = connection.play(fs.createReadStream('.opus')); // указываем путь к вашему голосовому сообщению в формате Opus
-
-//       dispatcher.on('start', () => {
-//         console.log('Голосовое сообщение начало воспроизведение');
-//       });
-
-//       dispatcher.on('finish', () => {
-//         console.log('Голосовое сообщение закончило воспроизведение');
-//         voiceChannel.leave(); // после окончания воспроизведения сообщения бот покидает голосовой канал
-//       });
-
-//       dispatcher.on('error', console.error);
-//     } catch (error) {
-//       console.error('Ошибка:', error);
-//     }
-//   }
-// });
-
-
-
-
-
-
-
-
-
-
 telegramBot.onText(/\/id/, (msg) => {
   const chatId = msg.chat.id;
   telegramBot.sendMessage(chatId, `${chatId}`);
 });
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
@@ -786,139 +457,9 @@ telegramBot.on('callback_query', (query) => {
   }
 });
 
-
-
-
-
-
-
-
-
-client.on('messageCreate', message => {
-    if (message.content.startsWith('!kiss')) {
-      if (!message.mentions.users.size) {
-        return message.channel.send('Тебе нужно пингануть человека!');
-      }
-
-      const taggedUser = message.mentions.users.first();
-      const embed = new MessageEmbed()
-        .setColor('#F08080')
-        .setTitle(`${message.author.username} поцеловал ${taggedUser.username}! 💖`)
-        .setImage('https://i.pinimg.com/originals/99/c4/18/99c41869ba1551575aefd9c8ffc533de.gif')
-      message.channel.send({ embeds: [embed] });
-  
-      console.warn(`Команда поцелуй запущена ${message.author.tag} в ${message.guild.name}#${message.channel.name}`);
-    }
-
-
-
-
-
-
-
-
-    if (message.content.startsWith('!add-role')) {
-        const roleMention = message.content.split(' ')[1];
-        const roleName = roleMention.replace(/<@&(\d+)>/, '$1'); // говорит о айди роли
-        const role = message.guild.roles.cache.get(roleName);
-
-        if (!role) {
-          return message.reply(`Извините, нет роли с ID ${roleName}.`); //текст о том, что забыл написать
-        }
-        
-        const member = message.mentions.members.first();
-        if (!member) {
-          return message.reply('Пожалуйста, укажите пользователя, которому нужно назначить роль.'); // текст о том, что забыл написать учасника
-        }
-        
-        const nickname = `🔖 ${member.displayName}`;
-        
-        member.setNickname(nickname).then(() => {
-          member.roles.add(role).then(() => {
-            message.reply(`Добавлена роль ${roleMention} для :bookmark: ${member.toString()}.`);
-          }).catch(err => {
-            message.reply(`Не удалось добавить роль ${member.displayName}: ${err.message}`);
-          });
-        }).catch(err => {
-          message.reply(`Не удалось установить псевдоним ${member.displayName}: ${err.message}`);
-        })
-    } else if (message.content.startsWith('!remove-role')) {
-        {
-            const roleMention = message.content.split(' ')[1];
-            if (!roleMention) {
-                return message.reply('Укажите роль, которую нужно удалить.🗑️');
-            }
-            const roleName = roleMention.replace(/<@&(\d+)>/, '$1'); // Extract role ID from mention
-            const role = message.guild.roles.cache.get(roleName);
-            if (!role) {
-              return message.reply(`Извините, нет роли с ID ${roleName}.`);
-            }
-            
-            const member = message.mentions.members.first();
-            if (!member) {
-              return message.reply('Пожалуйста, укажите пользователя, которому нужно назначить роль.');
-            }
-            
-            member.setNickname(null).then(() => {
-              member.roles.remove(role).then(() => {
-                message.reply(`Удалена роль ${roleMention} у :bookmark:${member.toString()}.`);
-              }).catch(err => {
-                message.reply(`Не удалось убрать роль ${member.displayName}: ${err.message}`);
-              });
-            }).catch(err => {
-              message.reply(`Не удалось восстановить никнейм ${member.displayName}: ${err.message}`);
-            })
-        }
-    }
-    if (message.content.startsWith('!emoji')) {
-      const member = message.mentions.members.first();
-      if (!member) {
-        return message.reply('Пожалуйста, укажите пользователя, чтобы установить эмодзи-роль.');
-      }
-    
-      const emoji = message.content.split(' ')[2];
-      const nickname = `${emoji} ${member.displayName}`;
-    
-      member.setNickname(nickname).then(() => {
-       // message.react(emoji);
-        message.reply(`Добавлен эмодзи ${emoji} к никнейму ${member.displayName}.`);
-      }).catch(err => {
-        message.reply(`Не удалось добавить эмодзи-роль для ${member.displayName}: ${err.message}`);
-      });
-    
-    } else if (message.content.startsWith('!remmoji')) {
-      const member = message.mentions.members.first();
-  if (!member) {
-    return message.reply('Please mention a user to remove the emoji from.');
-  }
-  const nickname = member.displayName.replace(/🔖\s*/g, '');
-  member.setNickname(nickname).then(() => {
-    message.reply(`Removed 🔖 emogi from ${member.displayName}.`);
-  }).catch(err => {
-    message.reply(`Unable to remove emogi role from ${member.displayName}: ${err.message}`);
-  });
-    }
-  })
-
+  //RoleChanger
   client.on('messageCreate', message => {
-  if (message.content.startsWith('!add-emoji')) {
-    const emojiName = message.content.split(' ')[1];
-    const emojiURL = message.content.split(' ')[2];
-
-    message.guild.emojis.create(emojiURL, emojiName)
-      .then(emoji => message.channel.send(`Emoji ${emoji} has been added!`))
-      .catch(error => message.channel.send(`Error: ${error}`));
-  } else if (message.content.startsWith('!del-emoji')) {
-      const emojiName = message.content.split(' ')[1];
-      const emoji = message.guild.emojis.cache.find(emoji => emoji.name === emojiName);
-      if (!emoji) {
-        return message.reply(`Sorry, couldn't find emoji ${emojiName}.`);
-      }
-      emoji.delete()
-        .then(() => message.reply(`Deleted emoji ${emojiName} successfully.`))
-        .catch(err => message.reply(`Error deleting emoji ${emojiName}: ${err.message}`));
-    }
-    const roleIds = ['1011607236138782820', '1075386755856994317', '1078503876375892111','1078503888266731651','1078503890619732008','1078503892922404975']; // менять роли
+    const roleIds = ['1078503876375892111', '1078503892922404975', '1078503890619732008']; // менять роли
     let intervalId;
     
     function changeRole() {
@@ -929,20 +470,12 @@ client.on('messageCreate', message => {
       }
       const randomRole = roleIds[Math.floor(Math.random() * roleIds.length)];
       const role = message.guild.roles.cache.get(randomRole);
-      if (!role) {
-        console.error('Role not found');
-        return;
-      }
       member.roles.set([role]).catch(console.error);
     }
     
-    if (message.content === 'changerole') {
-      if (intervalId) {
-        message.channel.send('Команда уже запущена!');
-        return;
-      }
-      intervalId = setInterval(changeRole, 2000); 
-      message.channel.send('Роль будет меняться каждые 2 секунды!');
+    if (message.content === '!changerole') {
+      intervalId = setInterval(changeRole, 5000); 
+      message.channel.send('Роль будет меняться каждые 5 секунды!');
     } else if (message.content === '!stopchangerole') {
       if (intervalId) {
         clearInterval(intervalId);
@@ -954,317 +487,87 @@ client.on('messageCreate', message => {
     }
   })
 
-  const isBlocked = false;
-  client.on('messageCreate', async message => {
-    if (message.content.startsWith('!sendmess')) {
-      // проверяем, есть ли у автора сообщения права админа
 
+// Хранилище для сообщений (лучше использовать базу данных в реальном проекте)
+const messageStore = new Map();
 
-      // if (!message.member.roles.cache.some(role => role.hasPermission('ADMINISTRATOR'))) {
-      //   return message.channel.send('У вас нет прав на использование этой команды');
-      // }
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isChatInputCommand()) return;
 
+  // Обработка команды /sendmess
+  if (interaction.commandName === 'sendmess') {
+    const userId = interaction.options.getString('user_id');
+    const messageText = interaction.options.getString('message');
 
-  
-      if (isBlocked) {
-        return message.author.send('Отправка сообщений заблокирована');
-      }
-  
-      const userId = message.mentions.users.first()?.id || message.content.split(' ')[1];
-      const text = message.content.replace(/<@!?(\d+)>/, '').split(' ').slice(2).join(' ');
-  
-      if (!userId || !text) {
-        return message.channel.send('Пожалуйста, укажите ID пользователя и текст сообщения');
-      }
-  
+    try {
       const user = await client.users.fetch(userId);
-      if (!user) {
-        return message.channel.send(`Пользователь с ID ${userId} не найден`);
-      }
-  
-      user.send(`<@${userId}>: ${text}`)
-        .then(() => {
-          message.channel.send(`Сообщение для <@${userId}> отправлено`);
-        })
-        .catch(error => {
-          message.channel.send(`Не удалось отправить сообщение для <@${userId}>: ${error.message}`);
-          console.error(error);
-        });
-  
-    } else if (message.content.startsWith('!sendblock')) {
+      await user.send(`📩 Анонимное сообщение:\n${messageText}\n\nОтветить: /re [сообщение]`);
 
-      // проверяем, есть ли у автора сообщения права админа
-      //  if (!message.member.roles.cache.some(role => role.hasPermission('ADMINISTRATOR'))) {
-      //   return message.channel.send('У вас нет прав на использование этой команды');
-      // }
-  
-      if (message.mentions.users.size === 0) {
-        return message.author.send('Пожалуйста, укажите пользователя, которого необходимо заблокировать');
-      }
-      isBlocked = true;
-      message.author.send(`Отправка сообщений для ${message.mentions.users.map(user => `<@${user.id}>`).join(', ')} заблокирована`);
-  
-    } else if (message.content.startsWith('!sendunblock')) {
-      // проверяем, есть ли у автора сообщения права админа
+      // Сохраняем связь: получатель → отправитель
+      if (!global.messageLinks) global.messageLinks = new Map();
+      global.messageLinks.set(userId, interaction.user.id); // userId получателя → ID отправителя
 
-//  if (!message.member.roles.cache.some(role => role.hasPermission('ADMINISTRATOR'))) {
-//         return message.channel.send('У вас нет прав на использование этой команды');
-//       }
-  
-      if (message.mentions.users.size === 0) {
-        return message.author.send('Пожалуйста, укажите пользователя, которого необходимо разблокиро')
-      }
+      await interaction.reply({
+        content: `✅ Сообщение отправлено пользователю <@${userId}>`,
+        flags: 64
+      });
+
+    } catch (error) {
+      await interaction.reply({
+        content: `❌ Ошибка: ${error.message}`,
+        flags: 64
+      });
     }
-  });
-
-
-
-
-
-
-
-
-
-
-// client.on('messageCreate', message => {
-//   if (message.content === "/avatar") {
-//     const embed = new RichEmbed()
-//     .setTitle('Avatar!')
-//     .setAuthor("Your Avatar", message.author.avatarURL)
-//     .setImage(message.author.avatarURL)
-//     .setColor('RANDOM')
-//     .setDescription('Avatar URL')
-//    message.reply(embed)
-//   }
-// });
-
-
-
-
-
-    // const roleIds = ['1011607236138782820', '1075386755856994317', '1078503876375892111','1078503888266731651','1078503890619732008','1078503892922404975']; // менять роли
-
-    // function changeRole() {
-    //   const member = message.guild.members.cache.get(message.author.id);
-    //   if (!member) {
-    //     console.error('Member not found');
-    //     return;
-    //   }
-    //   const randomRole = roleIds[Math.floor(Math.random() * roleIds.length)];
-    //   const role = message.guild.roles.cache.get(randomRole);
-    //   if (!role) {
-    //     console.error('Role not found');
-    //     return;
-    //   }
-    //   member.roles.set([role]).catch(console.error);
-    // }
-    
-    // if (message.content === 'rolechange') {
-    //   setInterval(changeRole, 3000); // 5000 миллисекунд = 5 секунд
-    //   message.channel.send('Роль будет меняться каждые 5 секунд!');
-    // }
-
-
-// client.on('ready', () =>{
-//     console.log('Compass is online');
-// })
-// client.on('message', (message) => {
-//     if (message.content == "1")! {
-//         message.reply(`<@${message.guild.ownerId}>`);
-//     }
-//     }
-// );
-// client.on('messageCreate', message=>{
-
-//     if (!message.content.startsWith(config.prefix) || message.author.bot) return;
-//         const args = message.content.slice(config.prefix.length).split(/ +/g);
-//         const command = args.shift().toLowerCase();
-
-//         const cmd = client.commands.get(command) || client.aliases.get(command);
-
-//     if (!cmd) return;
-
-//     cmd.run(client, message, args);
-// })
-// client.on('interactionCreate', async interaction => {
-// 	if (!interaction.isChatInputCommand()) return;
-
-// 	const { commandName } = interaction;
-
-// 	if (commandName === 'ping') {
-// 		await interaction.reply('Pong!');
-//     }
-// });
-
-
-
-// const { Configuration, OpenAIApi } = require("openai");
-// const { Client, Intents } = require('discord.js');
-
-
-// const fs = require('fs');
-// const client = new Client({intents: [
-//   Intents.FLAGS.GUILDS, 
-//   Intents.FLAGS.GUILD_MESSAGES,
-//   Intents.FLAGS.GUILD_MESSAGE_REACTIONS,
-//   Intents.FLAGS.DIRECT_MESSAGES,
-//   Intents.FLAGS.DIRECT_MESSAGE_REACTIONS,
-//   Intents.FLAGS.DIRECT_MESSAGE_TYPING,
-//   Intents.FLAGS.DIRECT_MESSAGE_TYPING] });
-
-//   config = require('./config.json');
-
-
-
-
-
-
-
-
-
-
-
-
-// const conf = new Configuration({
-//   apiKey: "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",
-// });
-// client.on('messageCreate', async message => {
-//   if (message.author.bot) return; // Ignore messages from bots
-//   if (!message.content.startsWith('!gpt')) return;
-// const api = new OpenAIApi(conf)
-// const model = "text-davinci-003";
-// const prompt = message.content.slice("!gpt")
-// try {
-//   const completions = await api.createCompletion({
-//     model,
-//     prompt,
-//     max_tokens: 2200,
-//     n: 1,
-//   });
-//   const response = completions.data.choices[0].text.trim();
-//   message.channel.send(response);
-// } catch (err) {
-//   console.error(err);
-//   message.channel.send("I'm sorry, I couldn't answer that question.");
-// }
-// console.log(message.content.slice(10)) // или какое у тебя сейчас число там.
-// });
-
-
-
-client.login(config.token);
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// const openai = require('openai');
-
-// config = require('./config.json');
-
-// const commandFiles = fs.readdirSync('./commands/act').filter(file => file.endsWith('.js'));
-
-// for (const file of commandFiles) {
-//    const command = require(`./commands/act/${file}`);
-//    client.commands.set(command.name, command);
-// }
-
-// const prompt = "I need an answer to the following question: What is the meaning of life?";
-// const engine = "text-davinci-002";
-// const apiKey = process.env.OPENAI_API_KEY;
-// openai.apiKey = "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";
-
-// client.on('messageCreate', async message => {
-//   if (message.content.startsWith('!question')) {
-//     const question = message.content.slice(10);
-//     const input = `${prompt}\nQ: ${question}\nA:`;
-//     const completions = await openai.default.complete({
-//       engine,
-//       apiKey,
-//       prompt: input,
-//       maxTokens: 1024,
-//       n: 1,
-//       stop: "\n"
-//     });
-//     const response = completions.choices[0].text.trim();
-//     message.channel.send(response);
-//   }
-// });
-// client.on('messageCreate', message => {
-//   if (!message.content.startsWith('!') || message.author.bot) return;
-
-//   const args = message.content.slice(1).trim().split(/ +/);
-//   const commandName = args.shift().toLowerCase();
-
-//   const command = client.commands.get(commandName) || client.commands.find(cmd => cmd.aliases && cmd.aliases.includes(commandName));
-
-//   if (!command) return;
-
-//   try {
-//     command.execute(message, args);
-//   } catch (error) {
-//     console.error(error);
-//     message.reply('There was an error trying to execute that command!');
-//   }
-//   client.on('interactionCreate', async interaction => {
-//     if (!interaction.isCommand()) return;
-  
-//     const { commandName } = interaction;
-  
-//     if (!client.commands.has(commandName)) return;
-  
-//     try {
-//       await client.commands.get(commandName).execute(interaction);
-//     } catch (error) {
-//       console.error(error);
-//       await interaction.reply({ content: 'There was an error while executing this command!', ephemeral: true });
-//     }
-//   });
-// });
+  }
+
+  // Обработка команды /re
+  if (interaction.commandName === 're') {
+    const replyText = interaction.options.getString('message');
+
+    try {
+      // Получаем ID оригинального отправителя
+      const originalSenderId = global.messageLinks?.get(interaction.user.id);
+
+      if (!originalSenderId) {
+        return interaction.reply({
+          content: "❌ Нет сообщений для ответа. Сначала отправьте кому-то сообщение через /sendmess",
+          flags: 64
+        });
+      }
+
+      // Отправляем ответ
+      const originalSender = await client.users.fetch(originalSenderId);
+      await originalSender.send(`📨 Ответ на ваше сообщение:\n${replyText}`);
+
+      // Обновляем связь для цепочки ответов
+      global.messageLinks.set(originalSenderId, interaction.user.id);
+
+      await interaction.reply({
+        content: "✅ Ответ отправлен!",
+        flags: 64
+      });
+
+    } catch (error) {
+      await interaction.reply({
+        content: `❌ Ошибка: ${error.message}`,
+        flags: 64
+      });
+    }
+  }
+});
+
+
+client.on('messageCreate', message => {
+  if (message.content === "avatar") {
+    const embed = new RichEmbed()
+    .setTitle('Avatar!')
+    .setAuthor("Your Avatar", message.author.avatarURL)
+    .setImage(message.author.avatarURL)
+    .setColor('RANDOM')
+    .setDescription('Avatar URL')
+   message.reply(embed)
+  }
+});
+
+
+client.login(config.tokenDS);
