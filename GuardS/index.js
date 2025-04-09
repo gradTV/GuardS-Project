@@ -40,42 +40,42 @@ const rest = new REST({ version: '10' }).setToken(discordToken);
 //     .setName('link')
 //     .setDescription('Link a Discord channel to a Telegram chat')
 //     .addChannelOption(option =>
-//       option.setName('discord_channel')
-//         .setDescription('Выберите канал Discord')
+//       option.setName('discord')
+//         .setDescription('Choose a Discord channel')
 //         .setRequired(true)
 //         .addChannelTypes(0)  // Только текстовые каналы
 //     )
 //     .addStringOption(option =>
-//       option.setName('telegram_chat_id')
-//         .setDescription('ID чата Telegram')
-//         .setRequired(true)
-//     ),
-
-//   new SlashCommandBuilder()
-//     .setName('sendmess')
-//     .setDescription('Send a message to a specified user')
-//     .addStringOption(option =>
-//       option.setName('user_id')
-//         .setDescription('ID пользователя для отправки сообщения')
-//         .setRequired(true)
-//     )
-//     .addStringOption(option =>
-//       option.setName('message')
-//         .setDescription('Сообщение для отправки')
+//       option.setName('telegram')
+//         .setDescription('Telegram chat ID')
 //         .setRequired(true)
 //     ),
 
 //     new SlashCommandBuilder()
-//     .setName('re')
-//     .setDescription('Ответить на сообщение')
+//     .setName('sendmess')
+//     .setDescription('Send a message to a specified user')
 //     .addStringOption(option =>
-//       option.setName('message')
-//         .setDescription('Текст ответа')
+//       option.setName('user_id')
+//         .setDescription('User ID to send the message to')
 //         .setRequired(true)
 //     )
+//     .addStringOption(option =>
+//       option.setName('message')
+//         .setDescription('Message to send')
+//         .setRequired(true)
+//     ),
+  
+//   new SlashCommandBuilder()
+//     .setName('re')
+//     .setDescription('Reply to a message')
+//     .addStringOption(option =>
+//       option.setName('message')
+//         .setDescription('Reply text')
+//         .setRequired(true)
+//     )  
 
 // ];
-// Когда бот готов, выполняем регистрацию команд
+// // Когда бот готов, выполняем регистрацию команд
 // client.once('ready', async () => {
 //   try {
 //     console.log('Started refreshing application (/) commands.');
@@ -104,8 +104,8 @@ client.on('interactionCreate', async (interaction) => {
   const { commandName } = interaction;
 
   if (commandName === 'link') {
-    const discordChannel = interaction.options.getChannel('discord_channel');
-    const telegramChatId = interaction.options.getString('telegram_chat_id');
+    const discordChannel = interaction.options.getChannel('discord');
+    const telegramChatId = interaction.options.getString('telegram');
 
     if (!discordChannel || !telegramChatId) {
       return interaction.reply('Ошибка: необходимо указать канал Discord и ID чата Telegram.');
@@ -127,7 +127,7 @@ client.on('interactionCreate', async (interaction) => {
       .setColor('#00FF00');
 
     await interaction.reply({ embeds: [embed] });
-  } 
+  }
 });
 
 
@@ -148,12 +148,12 @@ client.on('messageCreate', async (message) => {
   const telegramChatId = channelMappings[channelId];
 
   if (telegramChatId) {
-    let messageContent = `[${message.author.username}] ${message.content}`;
-
+    let messageContent = `[${message.member.nickname}] ${message.content}`;
+    
     // Check if the message is a reply
     if (message.reference) {
       const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
-      const repliedMessageContent = `[${repliedMessage.author.username}] ${repliedMessage.content}`;
+      const repliedMessageContent = `[${repliedMessage.author.first_name}] ${repliedMessage.content}`;
       messageContent = `\n> ${repliedMessageContent}: \n${messageContent}`;
     }
 
@@ -427,6 +427,7 @@ telegramBot.on('message', async (msg) => {
 
 
 // Заdумка, крч когdа ты в голосовом мог записать голосовое увеdомление в течении 10 секунd
+
 telegramBot.onText(/\/id/, (msg) => {
   const chatId = msg.chat.id;
   telegramBot.sendMessage(chatId, `${chatId}`);
@@ -500,8 +501,13 @@ client.on('interactionCreate', async interaction => {
     const messageText = interaction.options.getString('message');
 
     try {
-      const user = await client.users.fetch(userId);
-      await user.send(`📩 Анонимное сообщение:\n${messageText}\n\nОтветить: /re [сообщение]`);
+    const user = await client.users.fetch(userId);
+    await user.send(`📩 Анонимное сообщение:> ${messageText}\nОтветить: /re [сообщение]`);
+
+    await interaction.user.send({
+        content: `**You said**:\n> ${messageText}`,
+        allowedMentions: { parse: [] } // Disable mentions
+      });
 
       // Сохраняем связь: получатель → отправитель
       if (!global.messageLinks) global.messageLinks = new Map();
@@ -511,14 +517,16 @@ client.on('interactionCreate', async interaction => {
         content: `✅ Сообщение отправлено пользователю <@${userId}>`,
         flags: 64
       });
-
     } catch (error) {
-      await interaction.reply({
-        content: `❌ Ошибка: ${error.message}`,
-        flags: 64
-      });
+        console.error('Ошибка при отправке сообщения:', error);
+        await interaction.reply({
+          content: '❌ Не удалось отправить сообщение. Проверь правильность ID.',
+          flags: 64
+        });
     }
   }
+    
+  
 
   // Обработка команды /re
   if (interaction.commandName === 're') {
@@ -526,9 +534,9 @@ client.on('interactionCreate', async interaction => {
 
     try {
       // Получаем ID оригинального отправителя
-      const originalSenderId = global.messageLinks?.get(interaction.user.id);
+      const senderID = global.messageLinks?.get(interaction.user.id);
 
-      if (!originalSenderId) {
+      if (!senderID) {
         return interaction.reply({
           content: "❌ Нет сообщений для ответа. Сначала отправьте кому-то сообщение через /sendmess",
           flags: 64
@@ -536,11 +544,11 @@ client.on('interactionCreate', async interaction => {
       }
 
       // Отправляем ответ
-      const originalSender = await client.users.fetch(originalSenderId);
-      await originalSender.send(`📨 Ответ на ваше сообщение:\n${replyText}`);
+      const originalSender = await client.users.fetch(senderID);
+      await originalSender.send(`📨 **Ответ на ваше сообщение:**\n > ${replyText}\nОтветить: /re [сообщение]`);
 
       // Обновляем связь для цепочки ответов
-      global.messageLinks.set(originalSenderId, interaction.user.id);
+      global.messageLinks.set(senderID, interaction.user.id);
 
       await interaction.reply({
         content: "✅ Ответ отправлен!",
