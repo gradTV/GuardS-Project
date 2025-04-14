@@ -231,10 +231,10 @@ telegramBot.on('message', (msg) => {
   
       // Проверяем, определен ли объект msg.from и его свойство username
       if (msg.from && msg.from.username) {
-        messageContent = `**${msg.from.first_name || 'Аноним'} ${msg.from.last_name || ''}:**\n`;
+        messageContent = `**${msg.from.first_name || 'Anonim'} ${msg.from.last_name || ''}:**\n`;
       } else {
         // Если у пользователя нет username, используем его имя и фамилию
-        messageContent = `**${msg.from.first_name || 'Аноним'} ${msg.from.last_name || ''}:**\n`;
+        messageContent = `**${msg.from.first_name || 'Anonim'} ${msg.from.last_name || ''}:**\n`;
       }
 
       // Добавляем основное сообщение
@@ -243,14 +243,11 @@ telegramBot.on('message', (msg) => {
       // Если сообщение было переслано, добавляем информацию о пересылке и оригинальное сообщение
       if (msg.forward_from || (msg.reply_to_message && msg.reply_to_message.from)) {
         let forwardedFrom = '';
-
-        // Проверяем, определен ли объект msg.forward_from и его свойство username
         if (msg.forward_from && msg.forward_from.username) {
-          forwardedFrom = `${msg.forward_from.first_name || 'Аноним'} ${msg.forward_from.last_name || ''}`;
+          forwardedFrom = `${msg.forward_from.first_name || 'Anonim'} ${msg.forward_from.last_name || ''}`;
         } else if (msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.username) {
-          forwardedFrom = `${msg.reply_to_message.from.first_name || 'Аноним'} ${msg.reply_to_message.from.last_name || ''}`;
+          forwardedFrom = `${msg.reply_to_message.from.first_name || 'Anonim'} ${msg.reply_to_message.from.last_name || ''}`;
         } else if (msg.forward_from && msg.forward_from.first_name) {
-          // Если у пользователя нет username, используем его имя и фамилию
           forwardedFrom = `${msg.forward_from.first_name} ${msg.forward_from.last_name || ''}`;
         } else if (msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.first_name) {
           // Если у пользователя нет username, используем его имя и фамилию
@@ -273,68 +270,170 @@ telegramBot.on('message', (msg) => {
 
 
 
+const storageUser = {}; // Хранилище для временных данных пользователей
+const saveID = {}; // Хранилище для сохраненных ID
 
-
-
-
-
-telegramBot.onText(/\/link/, async (msg) => {
+telegramBot.onText(/\/link/, (msg) => {
   const chatId = msg.chat.id;
+  
+  // Initialize the NULL state for Discord and Telegram
+  if (!storageUser[chatId]) {
+    storageUser[chatId] = {
+      telegramChatId: null,
+      discordChannelId: null
+    };
+  }
+  
+  // Check ID
+  const infoTelegram = saveID[chatId]?.telegramChatId;
+  const infoDiscord = saveID[chatId]?.discordChannelId;
 
-  // Отправка запроса на ID чата Telegram
-  telegramBot.sendMessage(chatId, 'Введите ID чата Telegram:');
-  telegramBot.once('message', async (responseMsg) => {
-    const telegramChatId = responseMsg.text;
+  showMainMenu(chatId, infoTelegram, infoDiscord);
+});
 
-    // Проверка существования указанного Telegram-канала
-    try {
-      const telegramChatInfo = await telegramBot.getChat(telegramChatId);
-      if (!telegramChatInfo || (telegramChatInfo.type !== 'channel' && telegramChatInfo.type !== 'group' && telegramChatInfo.type !== 'supergroup')) {
-        telegramBot.sendMessage(chatId, 'Указанный чат Telegram не найден или не является каналом или группой.');
-        return;
+function showMainMenu(chatId, hasTelegram = false, hasDiscord = false) {
+  const buttons = [];
+  
+  // Button to Telegram
+  buttons.push([{
+    text: hasTelegram ? `Telegram ID: ${saveID[chatId].telegramChatId}` : 'Telegram ID:',
+    callback_data: 'input_telegram'
+  }]);
+  
+  // Button to Discord
+  buttons.push([{
+    text: hasDiscord ? `Discord ID: ${saveID[chatId].discordChannelId}` : 'Discord ID:',
+    callback_data: 'input_discord'
+  }]);
+  
+  // Congatulation button
+  if (hasTelegram && hasDiscord) {
+    buttons.push([{
+      text: '✅ Confirm the connection',
+      callback_data: 'confirm_link'
+    }]);
+  }
+
+  const opts = {
+    reply_markup: {
+      inline_keyboard: buttons
+    }
+  };
+
+  telegramBot.sendMessage(chatId, 'Select an action:', opts);
+}
+
+telegramBot.on('callback_query', async (callbackQuery) => {
+  const chatId = callbackQuery.message.chat.id;
+  const data = callbackQuery.data;
+  
+  if (data === 'input_telegram') {
+    if (saveID[chatId]?.telegramChatId) {
+      // Editing an existing ID
+      const opts = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: 'Change TG ID', callback_data: 'change_telegram' },
+              { text: 'Back', callback_data: 'back_to_main' }
+            ]
+          ]
+        }
+      };
+    } else {
+      telegramBot.sendMessage(chatId, 'Enter the Telegram chat ID');
+      storageUser[chatId].awaiting = 'telegram';
+    }
+  }
+  else if (data === 'input_discord') {
+    if (saveID[chatId]?.discordChannelId) {
+      const opts = {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: 'Изменить Discord ID', callback_data: 'change_discord' },
+              { text: 'Назад', callback_data: 'back_to_main' }
+            ]
+          ]
+        }
+      };
+    } else {
+      //request Discord ID
+      telegramBot.sendMessage(chatId, 'Введите ID канала Discord:');
+      storageUser[chatId].awaiting = 'discord';
+    }
+  }
+  else if (data === 'change_telegram') {
+    telegramBot.sendMessage(chatId, 'Введите новый ID чата Telegram:');
+    storageUser[chatId].awaiting = 'telegram';
+  }
+  else if (data === 'change_discord') {
+    telegramBot.sendMessage(chatId, 'Введите новый ID канала Discord:');
+    storageUser[chatId].awaiting = 'discord';
+  }
+  else if (data === 'back_to_main') {
+    showMainMenu(chatId, saveID[chatId]?.telegramChatId, saveID[chatId]?.discordChannelId);
+  }
+  else if (data === 'confirm_link') {
+    channelMappings[saveID[chatId].discordChannelId] = saveID[chatId].telegramChatId;
+    
+    //Send congratulation
+    telegramBot.sendPhoto(
+      chatId,
+      'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS7R-faUiuXq9zE8SYcP8OViy0qYevCwmbuly3MKZuvj9fXe3SeCDF6cvcwuEN__sunyRE&usqp=CAU',
+      {
+        caption: `Связь установлена!\nTelegram: ${saveID[chatId].telegramChatId}\nDiscord: ${saveID[chatId].discordChannelId}`
       }
+    );
+    delete storageUser[chatId];
+  }
+  
+  telegramBot.answerCallbackQuery(callbackQuery.id);
+});
+
+// ID input handler
+telegramBot.on('message', async (msg) => {
+  const chatId = msg.chat.id;
+  const text = msg.text;
+  
+  if (!storageUser[chatId]?.awaiting) return;
+  
+  if (storageUser[chatId].awaiting === 'telegram') {
+    try {
+      const telegramChatInfo = await telegramBot.getChat(text);
+      if (!['channel', 'group', 'supergroup'].includes(telegramChatInfo.type)) {
+        throw new Error('Неверный тип чата');
+      }
+      
+      // Save ID Telegram
+      if (!saveID[chatId]) saveID[chatId] = {};
+      saveID[chatId].telegramChatId = text;
+      showMainMenu(chatId, true, saveID[chatId]?.discordChannelId);
     } catch (error) {
-      telegramBot.sendMessage(chatId, 'Указанный чат Telegram не найден.');
+      telegramBot.sendMessage(chatId, '❌ Ошибка: Указанный чат Telegram не найден или не является каналом/группой.');
+    }
+  }
+  else if (storageUser[chatId].awaiting === 'discord') {
+    const discordChannelId = text.match(/\d+/)?.[0];
+    if (!discordChannelId) {
+      telegramBot.sendMessage(chatId, '❌ Неверный формат ID. Введите только цифры.');
+      return;
+    }
+    
+    const discordChannel = client.channels.cache.get(discordChannelId);
+    if (!discordChannel) {
+      telegramBot.sendMessage(chatId, '❌ Канал Discord не найден.');
       return;
     }
 
-    // Отправка запроса на упоминание канала Discord
-    telegramBot.sendMessage(chatId, 'Укажите ID канала Discord:');
-    telegramBot.once('message', async (responseMsg) => {
-      const discordChannelMention = responseMsg.text;
+    //
+    if (!saveID[chatId]) saveID[chatId] = {};
+    saveID[chatId].discordChannelId = discordChannelId;
+    
+    showMainMenu(chatId, saveID[chatId]?.telegramChatId, true);
+  }
 
-      // Извлечение ID из упоминания канала Discord
-      const matches = discordChannelMention.match(/\d+/);
-      if (!matches) {
-        telegramBot.sendMessage(chatId, 'Указанный канал Discord не найден.');
-        return;
-      }
-
-      const discordChannelId = matches[0];
-
-      const discordChannel = client.channels.cache.get(discordChannelId);
-      if (!discordChannel) {
-        telegramBot.sendMessage(chatId, 'Указанный канал Discord не найден.');
-        return;
-      }
-
-      // Установка связи между каналами
-      channelMappings[discordChannel.id] = telegramChatId;
-
-      const embed = new EmbedBuilder()
-        .setTitle('Связь установлена')
-        .setDescription(`Канал Discord ${discordChannel} связан с каналом Telegram ${telegramChatId}`)
-        .setColor('#00FF00');
-
-      // Отправка уведомления в Telegram
-      telegramBot.sendPhoto(chatId, 'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcQjSAxcY45oqP3C_w_2J7GFY6q1RrFDdwuOwcIwH4IIaRaO1oeSj9bMJzg6MHLxi9rzrfc&usqp=CAU', {
-        caption: 'Связь успешно установлена.'
-      });
-      
-      // Отправка сообщения в Discord о связи
-      discordChannel.send({ embeds: [embed] });
-    });
-  });
+  delete storageUser[chatId].awaiting;
 });
 
 
@@ -502,11 +601,10 @@ client.on('interactionCreate', async interaction => {
 
     try {
     const user = await client.users.fetch(userId);
-    await user.send(`📩 Анонимное сообщение:> ${messageText}\nОтветить: /re [сообщение]`);
+    await user.send(`📩 Anonimное сообщение:> ${messageText}\nОтветить: /re [сообщение]`);
 
     await interaction.user.send({
         content: `**You said**:\n> ${messageText}`,
-        allowedMentions: { parse: [] } // Disable mentions
       });
 
       // Сохраняем связь: получатель → отправитель
@@ -525,9 +623,7 @@ client.on('interactionCreate', async interaction => {
         });
     }
   }
-    
   
-
   // Обработка команды /re
   if (interaction.commandName === 're') {
     const replyText = interaction.options.getString('message');
@@ -543,6 +639,10 @@ client.on('interactionCreate', async interaction => {
         });
       }
 
+      await interaction.user.send({
+        content: `**You said**:\n> ${replyText}`
+      });
+
       // Отправляем ответ
       const originalSender = await client.users.fetch(senderID);
       await originalSender.send(`📨 **Ответ на ваше сообщение:**\n > ${replyText}\nОтветить: /re [сообщение]`);
@@ -554,7 +654,6 @@ client.on('interactionCreate', async interaction => {
         content: "✅ Ответ отправлен!",
         flags: 64
       });
-
     } catch (error) {
       await interaction.reply({
         content: `❌ Ошибка: ${error.message}`,
