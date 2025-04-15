@@ -3,7 +3,7 @@ const https = require('https');
 const { REST } = require('@discordjs/rest');
 const { Routes } = require('discord-api-types/v9');
 const { SlashCommandBuilder } = require('@discordjs/builders');
-
+const { PassThrough } = require('stream');
 
 process.env.NTBA_FIX_319 = 1;
 process.env.NTBA_FIX_350 = 0;
@@ -139,8 +139,7 @@ const { exec } = require('child_process');
 
 
 
-//Из Dискорд в телеграмм
-
+// Discord-to-Telegram message relay with support for replies and media.
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
 
@@ -153,11 +152,11 @@ client.on('messageCreate', async (message) => {
     // Check if the message is a reply
     if (message.reference) {
       const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
-      const repliedMessageContent = `[${repliedMessage.author.first_name}] ${repliedMessage.content}`;
+      const repliedMessageContent = `[${repliedMessage.author.globalName}] ${repliedMessage.content}`;
       messageContent = `\n> ${repliedMessageContent}: \n${messageContent}`;
     }
 
-    // Отправка уведомлений из дс в телеграмм
+    // Send message Discord-to-Telegram
     if (messageContent) {
       if (message.attachments.size > 0) {
         message.attachments.forEach(async (attachment) => {
@@ -178,7 +177,7 @@ client.on('messageCreate', async (message) => {
               });
             });
           }
-          // Отправка файлов в URL
+          // Send file as URL
           const filePath = new URL(fileLink).pathname;
           if (/\.(jpg|jpeg|png)$/i.test(filePath)) {
             https.get(fileLink, async (response) => {
@@ -231,10 +230,10 @@ telegramBot.on('message', (msg) => {
   
       // Проверяем, определен ли объект msg.from и его свойство username
       if (msg.from && msg.from.username) {
-        messageContent = `**${msg.from.first_name || 'Anonim'} ${msg.from.last_name || ''}:**\n`;
+        messageContent = `**${msg.from.first_name || 'Аноним'} ${msg.from.last_name || ''}:**\n`;
       } else {
         // Если у пользователя нет username, используем его имя и фамилию
-        messageContent = `**${msg.from.first_name || 'Anonim'} ${msg.from.last_name || ''}:**\n`;
+        messageContent = `**${msg.from.first_name || 'Аноним'} ${msg.from.last_name || ''}:**\n`;
       }
 
       // Добавляем основное сообщение
@@ -243,11 +242,14 @@ telegramBot.on('message', (msg) => {
       // Если сообщение было переслано, добавляем информацию о пересылке и оригинальное сообщение
       if (msg.forward_from || (msg.reply_to_message && msg.reply_to_message.from)) {
         let forwardedFrom = '';
+
+        // Проверяем, определен ли объект msg.forward_from и его свойство username
         if (msg.forward_from && msg.forward_from.username) {
-          forwardedFrom = `${msg.forward_from.first_name || 'Anonim'} ${msg.forward_from.last_name || ''}`;
+          forwardedFrom = `${msg.forward_from.first_name || 'Аноним'} ${msg.forward_from.last_name || ''}`;
         } else if (msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.username) {
-          forwardedFrom = `${msg.reply_to_message.from.first_name || 'Anonim'} ${msg.reply_to_message.from.last_name || ''}`;
+          forwardedFrom = `${msg.reply_to_message.from.first_name || 'Аноним'} ${msg.reply_to_message.from.last_name || ''}`;
         } else if (msg.forward_from && msg.forward_from.first_name) {
+          // Если у пользователя нет username, используем его имя и фамилию
           forwardedFrom = `${msg.forward_from.first_name} ${msg.forward_from.last_name || ''}`;
         } else if (msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.first_name) {
           // Если у пользователя нет username, используем его имя и фамилию
@@ -270,10 +272,11 @@ telegramBot.on('message', (msg) => {
 
 
 
-const storageUser = {}; // Хранилище для временных данных пользователей
-const saveID = {}; // Хранилище для сохраненных ID
+const storageUser = {}; // Storage for temporary user data
+const saveID = {}; // Storage for saved IDs
+const menuMessages = {}; // Storage for menu message IDs
 
-telegramBot.onText(/\/link/, (msg) => {
+telegramBot.onText(/\/link/, async (msg) => {
   const chatId = msg.chat.id;
   
   // Initialize the NULL state for Discord and Telegram
@@ -288,10 +291,22 @@ telegramBot.onText(/\/link/, (msg) => {
   const infoTelegram = saveID[chatId]?.telegramChatId;
   const infoDiscord = saveID[chatId]?.discordChannelId;
 
-  showMainMenu(chatId, infoTelegram, infoDiscord);
+  // If menu already exists, edit it
+  if (menuMessages[chatId]) {
+    try {
+      await showMainMenu(chatId, infoTelegram, infoDiscord);
+      return;
+    } catch (e) {
+      // If message doesn't exist anymore, send new one
+      delete menuMessages[chatId];
+    }
+  }
+  
+  // Send new menu
+  await showMainMenu(chatId, infoTelegram, infoDiscord);
 });
 
-function showMainMenu(chatId, hasTelegram = false, hasDiscord = false) {
+async function showMainMenu(chatId, hasTelegram = false, hasDiscord = false) {
   const buttons = [];
   
   // Button to Telegram
@@ -306,7 +321,7 @@ function showMainMenu(chatId, hasTelegram = false, hasDiscord = false) {
     callback_data: 'input_discord'
   }]);
   
-  // Congatulation button
+  // Confirmation button
   if (hasTelegram && hasDiscord) {
     buttons.push([{
       text: '✅ Confirm the connection',
@@ -320,16 +335,32 @@ function showMainMenu(chatId, hasTelegram = false, hasDiscord = false) {
     }
   };
 
-  telegramBot.sendMessage(chatId, 'Select an action:', opts);
+  // Edit existing message or send new one
+  if (menuMessages[chatId]) {
+    await telegramBot.editMessageText('Select an action:', {
+      chat_id: chatId,
+      message_id: menuMessages[chatId],
+      reply_markup: opts.reply_markup
+    });
+  } else {
+    const sentMessage = await telegramBot.sendMessage(chatId, 'Select an action:', opts);
+    menuMessages[chatId] = sentMessage.message_id;
+  }
 }
 
 telegramBot.on('callback_query', async (callbackQuery) => {
   const chatId = callbackQuery.message.chat.id;
+  const messageId = callbackQuery.message.message_id;
   const data = callbackQuery.data;
+  
+  // Store message ID if not already stored
+  if (!menuMessages[chatId]) {
+    menuMessages[chatId] = messageId;
+  }
   
   if (data === 'input_telegram') {
     if (saveID[chatId]?.telegramChatId) {
-      // Editing an existing ID
+      // Show edit menu
       const opts = {
         reply_markup: {
           inline_keyboard: [
@@ -340,8 +371,15 @@ telegramBot.on('callback_query', async (callbackQuery) => {
           ]
         }
       };
+      await telegramBot.editMessageReplyMarkup(opts.reply_markup, {
+        chat_id: chatId,
+        message_id: messageId
+      });
     } else {
-      telegramBot.sendMessage(chatId, 'Enter the Telegram chat ID');
+      await telegramBot.editMessageText('Enter the Telegram chat ID:', {
+        chat_id: chatId,
+        message_id: messageId
+      });
       storageUser[chatId].awaiting = 'telegram';
     }
   }
@@ -351,49 +389,63 @@ telegramBot.on('callback_query', async (callbackQuery) => {
         reply_markup: {
           inline_keyboard: [
             [
-              { text: 'Изменить Discord ID', callback_data: 'change_discord' },
-              { text: 'Назад', callback_data: 'back_to_main' }
+              { text: 'Change Discord ID', callback_data: 'change_discord' },
+              { text: 'Back', callback_data: 'back_to_main' }
             ]
           ]
         }
       };
+      await telegramBot.editMessageReplyMarkup(opts.reply_markup, {
+        chat_id: chatId,
+        message_id: messageId
+      });
     } else {
-      //request Discord ID
-      telegramBot.sendMessage(chatId, 'Введите ID канала Discord:');
+      await telegramBot.editMessageText('Enter Discord channel ID:', {
+        chat_id: chatId,
+        message_id: messageId
+      });
       storageUser[chatId].awaiting = 'discord';
     }
   }
   else if (data === 'change_telegram') {
-    telegramBot.sendMessage(chatId, 'Введите новый ID чата Telegram:');
+    await telegramBot.editMessageText('Enter new Telegram chat ID:', {
+      chat_id: chatId,
+      message_id: messageId
+    });
     storageUser[chatId].awaiting = 'telegram';
   }
   else if (data === 'change_discord') {
-    telegramBot.sendMessage(chatId, 'Введите новый ID канала Discord:');
+    await telegramBot.editMessageText('Enter new Discord channel ID:', {
+      chat_id: chatId,
+      message_id: messageId
+    });
     storageUser[chatId].awaiting = 'discord';
   }
   else if (data === 'back_to_main') {
-    showMainMenu(chatId, saveID[chatId]?.telegramChatId, saveID[chatId]?.discordChannelId);
+    await showMainMenu(chatId, saveID[chatId]?.telegramChatId, saveID[chatId]?.discordChannelId);
   }
   else if (data === 'confirm_link') {
     channelMappings[saveID[chatId].discordChannelId] = saveID[chatId].telegramChatId;
     
-    //Send congratulation
-    telegramBot.sendPhoto(
+    // Send confirmation (new message)
+    await telegramBot.sendPhoto(
       chatId,
       'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcS7R-faUiuXq9zE8SYcP8OViy0qYevCwmbuly3MKZuvj9fXe3SeCDF6cvcwuEN__sunyRE&usqp=CAU',
       {
-        caption: `Связь установлена!\nTelegram: ${saveID[chatId].telegramChatId}\nDiscord: ${saveID[chatId].discordChannelId}`
+        caption: `Connection established!\nTelegram: ${saveID[chatId].telegramChatId}\nDiscord: ${saveID[chatId].discordChannelId}`
       }
     );
     delete storageUser[chatId];
+    delete menuMessages[chatId];
   }
   
-  telegramBot.answerCallbackQuery(callbackQuery.id);
+  await telegramBot.answerCallbackQuery(callbackQuery.id);
 });
 
 // ID input handler
 telegramBot.on('message', async (msg) => {
   const chatId = msg.chat.id;
+  const messageId = msg.message_id; // Получаем ID сообщения пользователя
   const text = msg.text;
   
   if (!storageUser[chatId]?.awaiting) return;
@@ -402,40 +454,57 @@ telegramBot.on('message', async (msg) => {
     try {
       const telegramChatInfo = await telegramBot.getChat(text);
       if (!['channel', 'group', 'supergroup'].includes(telegramChatInfo.type)) {
-        throw new Error('Неверный тип чата');
+        throw new Error('Invalid chat type');
       }
       
-      // Save ID Telegram
+      // Save Telegram ID on button
       if (!saveID[chatId]) saveID[chatId] = {};
       saveID[chatId].telegramChatId = text;
-      showMainMenu(chatId, true, saveID[chatId]?.discordChannelId);
+      
+      // Delete Telegram ID on button
+      try {
+        await telegramBot.deleteMessage(chatId, messageId);
+      } catch (e) {
+        console.log('Could not delete message:', e.message);
+      }
+      
+      await showMainMenu(chatId, true, saveID[chatId]?.discordChannelId);
     } catch (error) {
-      telegramBot.sendMessage(chatId, '❌ Ошибка: Указанный чат Telegram не найден или не является каналом/группой.');
+      await telegramBot.sendMessage(chatId, '❌ Error: Specified Telegram chat not found or not a channel/group.');
+      await showMainMenu(chatId, saveID[chatId]?.telegramChatId, saveID[chatId]?.discordChannelId);
     }
   }
   else if (storageUser[chatId].awaiting === 'discord') {
     const discordChannelId = text.match(/\d+/)?.[0];
     if (!discordChannelId) {
-      telegramBot.sendMessage(chatId, '❌ Неверный формат ID. Введите только цифры.');
+      await telegramBot.sendMessage(chatId, '❌ Invalid ID format. Enter numbers only.');
+      await showMainMenu(chatId, saveID[chatId]?.telegramChatId, saveID[chatId]?.discordChannelId);
       return;
     }
     
     const discordChannel = client.channels.cache.get(discordChannelId);
     if (!discordChannel) {
-      telegramBot.sendMessage(chatId, '❌ Канал Discord не найден.');
+      await telegramBot.sendMessage(chatId, '❌ Discord channel not found.');
+      await showMainMenu(chatId, saveID[chatId]?.telegramChatId, saveID[chatId]?.discordChannelId);
       return;
     }
 
-    //
+    // Save Discord ID
     if (!saveID[chatId]) saveID[chatId] = {};
     saveID[chatId].discordChannelId = discordChannelId;
     
-    showMainMenu(chatId, saveID[chatId]?.telegramChatId, true);
+    // Auto-delete after relay
+    try {
+      await telegramBot.deleteMessage(chatId, messageId);
+    } catch (e) {
+      console.log('Could not delete message:', e.message);
+    }
+    
+    await showMainMenu(chatId, saveID[chatId]?.telegramChatId, true);
   }
 
   delete storageUser[chatId].awaiting;
 });
-
 
 
 // Из Telegram в Discord
@@ -452,25 +521,26 @@ telegramBot.on('message', async (msg) => {
         let fileLink = '';
 
         if (msg.photo) {
-          fileLink = await telegramBot.getFileLink(msg.photo[msg.photo.length - 1].file_id);
+          fileLink = await telegramBot.getFileLink(msg.photo[msg.photo.length - 1].file_id); // photo
         } else if (msg.video) {
-          fileLink = await telegramBot.getFileLink(msg.video.file_id);
+          fileLink = await telegramBot.getFileLink(msg.video.file_id);        // video
         } else if (msg.audio) {
-          fileLink = await telegramBot.getFileLink(msg.audio.file_id);
+          fileLink = await telegramBot.getFileLink(msg.audio.file_id);       // audio
         } else if (msg.animation) {
-          fileLink = await telegramBot.getFileLink(msg.animation.file_id);             //фото, гиф, видео и голосовые
+          fileLink = await telegramBot.getFileLink(msg.animation.file_id);  // gif
         }
 
         discordChannel.send({
           content: messageText,
           files: [fileLink]
-        });
+        });                                                                // file
       }
     }
   }
 });
 
-// Обработчик голосового уведомления
+// Voice message handler
+
 telegramBot.on('message', async (msg) => {
   if (msg.voice) {
     const messageText = `**${msg.from.first_name}**`;
@@ -481,48 +551,39 @@ telegramBot.on('message', async (msg) => {
     if (discordChannelId) {
       const discordChannel = client.channels.cache.get(discordChannelId);
       if (discordChannel) {
-        let fileLink = '';
+        const fileLink = await telegramBot.getFileLink(msg.voice.file_id);
 
-        if (msg.voice) {
-          fileLink = await telegramBot.getFileLink(msg.voice.file_id);
-        }
+        https.get(fileLink, (response) => {
+          const inputStream = new PassThrough();
+          response.pipe(inputStream);
 
-        // Создание потока файла для сохранения на диск
-        const inputFilePath = `./${fileLink.split('/').pop()}`;
-        const outputFilePath = inputFilePath.replace('.oga', '.mp3');
-        const fileStream = fs.createWriteStream(inputFilePath);
+          const outputStream = new PassThrough();
 
-        fileStream.on('finish', () => {
-          // Convert "oga" to "mp3"
-          ffmpeg(inputFilePath)
+          ffmpeg(inputStream)
             .toFormat('mp3')
-            .on('end', () => {
-              console.log('Конвертация завершена.');
-              // Отправка сконвертированного файла в Discord
-              const convertedFileStream = outputFilePath;
-              // Отправляем файл
-              discordChannel.send({
-                content: messageText,
-                files: [{
-                  attachment: convertedFileStream,
-                  name: outputFilePath.split('/').pop()
-                }]
-              }).then(() => {
-                console.log('Файл успешно отправлен в Discord');
-                // Удаление временных файлов
-                fs.unlinkSync(inputFilePath);
-                fs.unlinkSync(outputFilePath);
-              }).catch(console.error);
-            })
             .on('error', (err) => {
-              console.error('Ошибка конвертации:', err);
+              console.error('Error: Convertation', err);
             })
-            .save(outputFilePath);
+            .pipe(outputStream);
+
+          const fileName = `Voice`;
+
+          discordChannel.send({
+            content: messageText,
+            files: [{
+              attachment: outputStream,
+              name: fileName
+            }]
+          }).then(() => {
+            console.log('Файл успешно отправлен в Discord');
+          }).catch(console.error);
         });
       }
     }
   }
 });
+
+
 
 
 // Заdумка, крч когdа ты в голосовом мог записать голосовое увеdомление в течении 10 секунd
@@ -601,7 +662,7 @@ client.on('interactionCreate', async interaction => {
 
     try {
     const user = await client.users.fetch(userId);
-    await user.send(`📩 Anonimное сообщение:> ${messageText}\nОтветить: /re [сообщение]`);
+    await user.send(`📩 Анонимное сообщение:> ${messageText}\nОтветить: /re [сообщение]`);
 
     await interaction.user.send({
         content: `**You said**:\n> ${messageText}`,
