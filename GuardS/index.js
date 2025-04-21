@@ -202,7 +202,7 @@ client.on('messageCreate', async (message) => {
               });
             });
           } else {
-            // Отправка документов
+            // Send Document
             telegramBot.sendDocument(telegramChatId, fileLink, { caption: messageContent });
           }
         });
@@ -214,6 +214,125 @@ client.on('messageCreate', async (message) => {
 });
 
 
+const tmp = require('tmp');
+
+// Telegram to Discord
+telegramBot.on('message', async (msg) => {
+  
+  const messageText = `**${msg.from.first_name}**`;
+  const discordChannelId = Object.keys(channelMappings).find(
+    (channelId) => channelMappings[channelId] === msg.chat.id.toString()
+  );
+
+  if (!discordChannelId) return;
+
+  const discordChannel = client.channels.cache.get(discordChannelId);
+  if (!discordChannel) return;
+
+  if (msg.photo || msg.video || msg.audio || msg.animation || msg.voice || msg.sticker ) {
+    let fileLink = '';
+
+    if (msg.photo) {
+      fileLink = await telegramBot.getFileLink(msg.photo[msg.photo.length - 1].file_id); // photo
+    } else if (msg.video) {
+      fileLink = await telegramBot.getFileLink(msg.video.file_id); // video
+    } else if (msg.audio) {
+      fileLink = await telegramBot.getFileLink(msg.audio.file_id); // audio
+    } else if (msg.animation) {
+      fileLink = await telegramBot.getFileLink(msg.animation.file_id); // gif
+    } else if (msg.voice) {
+      fileLink = await telegramBot.getFileLink(msg.voice.file_id);
+
+      https.get(fileLink, (response) => {
+        const inputStream = new PassThrough();
+        response.pipe(inputStream);
+  
+        const outputStream = new PassThrough();
+  
+        ffmpeg(inputStream)
+          .toFormat('mp3')
+          .on('error', (err) => {
+            console.error('Error: Convertation', err);
+          })
+          .pipe(outputStream);
+  
+        const fileName = `voice_${msg.voice.file_id}.mp3`;
+        
+        discordChannel.send({
+          content: messageText,
+          files: [{
+            attachment: outputStream,
+            name: fileName
+          }]
+        });
+      });
+    } else if(msg.sticker) { 
+      try {
+        const fileLink = await telegramBot.getFileLink(msg.sticker.file_id);
+      
+        https.get(fileLink, async (response) => {
+          const inputStream = new PassThrough();
+          response.pipe(inputStream);
+      
+          const chunks = [];
+          const ffmpegProcess = ffmpeg(inputStream)
+            .outputFormat('apng') // Или 'webp' для анимированных
+            .on('error', (err) => {
+              console.error('❌ Ошибка при конвертации:', err.message);
+            })
+            .on('end', async () => {
+              const buffer = Buffer.concat(chunks);
+      
+              // if (buffer.length > 512 * 1024) {
+              //   console.error(`❌ Стикер слишком большой: ${(buffer.length / 1024).toFixed(1)} KB`);
+              //   return;
+              // }
+      
+              try {
+                const guild = discordChannel.guild;
+      
+                const sticker = await guild.stickers.create({
+                  name: `sticker_${msg.sticker.file_unique_id.slice(0, 24)}`,
+                  description: 'Стикер из Telegram',
+                  tags: '💬',
+                  file: {
+                    attachment: buffer,
+                    name: 'sticker.png'
+                  }
+                });
+      
+                console.log('🎉 Стикер добавлен:', sticker.url);
+      
+                // 🟢 Отправляем в канал
+                await discordChannel.send({ stickers: [sticker.id] });
+                console.log('📤 Стикер отправлен в чат');
+      
+                // ⏳ Удаляем через 5 секунд
+                setTimeout(() => {
+                  sticker.delete()
+                    .then(() => console.log('🗑 Стикер удалён с сервера'))
+                    .catch(err => console.error('⚠ Ошибка при удалении стикера:', err.message));
+                }, 5000);
+      
+              } catch (err) {
+                console.error('❌ Ошибка при добавлении стикера:', err.message);
+              }
+            })
+            .pipe();
+      
+          ffmpegProcess.on('data', chunk => chunks.push(chunk));
+        });
+      } catch (err) {
+        console.error('❌ Ошибка обработки стикера:', err.message);
+      }
+    } else {
+      discordChannel.send({
+        content: messageText,
+        files: [fileLink]
+      });
+    }
+  }
+});
 
 
 
@@ -266,11 +385,6 @@ telegramBot.on('message', (msg) => {
     }
   }
 })
-
-
-
-
-
 
 const storageUser = {}; // Storage for temporary user data
 const saveID = {}; // Storage for saved IDs
@@ -507,85 +621,6 @@ telegramBot.on('message', async (msg) => {
 });
 
 
-// Из Telegram в Discord
-telegramBot.on('message', async (msg) => {
-  if (msg.photo || msg.video || msg.audio || msg.animation) {
-    const messageText = `**${msg.from.first_name}**`;
-    const discordChannelId = Object.keys(channelMappings).find(
-      (channelId) => channelMappings[channelId] === msg.chat.id.toString()
-    );
-
-    if (discordChannelId) {
-      const discordChannel = client.channels.cache.get(discordChannelId);
-      if (discordChannel) {
-        let fileLink = '';
-
-        if (msg.photo) {
-          fileLink = await telegramBot.getFileLink(msg.photo[msg.photo.length - 1].file_id); // photo
-        } else if (msg.video) {
-          fileLink = await telegramBot.getFileLink(msg.video.file_id);        // video
-        } else if (msg.audio) {
-          fileLink = await telegramBot.getFileLink(msg.audio.file_id);       // audio
-        } else if (msg.animation) {
-          fileLink = await telegramBot.getFileLink(msg.animation.file_id);  // gif
-        }
-
-        discordChannel.send({
-          content: messageText,
-          files: [fileLink]
-        });                                                                // file
-      }
-    }
-  }
-});
-
-// Voice message handler
-
-telegramBot.on('message', async (msg) => {
-  if (msg.voice) {
-    const messageText = `**${msg.from.first_name}**`;
-    const discordChannelId = Object.keys(channelMappings).find(
-      (channelId) => channelMappings[channelId] === msg.chat.id.toString()
-    );
-
-    if (discordChannelId) {
-      const discordChannel = client.channels.cache.get(discordChannelId);
-      if (discordChannel) {
-        const fileLink = await telegramBot.getFileLink(msg.voice.file_id);
-
-        https.get(fileLink, (response) => {
-          const inputStream = new PassThrough();
-          response.pipe(inputStream);
-
-          const outputStream = new PassThrough();
-
-          ffmpeg(inputStream)
-            .toFormat('mp3')
-            .on('error', (err) => {
-              console.error('Error: Convertation', err);
-            })
-            .pipe(outputStream);
-
-          const fileName = `Voice`;
-
-          discordChannel.send({
-            content: messageText,
-            files: [{
-              attachment: outputStream,
-              name: fileName
-            }]
-          }).then(() => {
-            console.log('Файл успешно отправлен в Discord');
-          }).catch(console.error);
-        });
-      }
-    }
-  }
-});
-
-
-
-
 // Заdумка, крч когdа ты в голосовом мог записать голосовое увеdомление в течении 10 секунd
 
 telegramBot.onText(/\/id/, (msg) => {
@@ -736,6 +771,5 @@ client.on('messageCreate', message => {
    message.reply(embed)
   }
 });
-
 
 client.login(config.tokenDS);
