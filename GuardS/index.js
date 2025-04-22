@@ -241,7 +241,7 @@ telegramBot.on('message', async (msg) => {
     } else if (msg.animation) {
       fileLink = await telegramBot.getFileLink(msg.animation.file_id); // gif
     } else if (msg.voice) {
-      fileLink = await telegramBot.getFileLink(msg.voice.file_id);
+      fileLink = await telegramBot.getFileLink(msg.voice.file_id); // voice
 
       https.get(fileLink, (response) => {
         const inputStream = new PassThrough();
@@ -258,81 +258,69 @@ telegramBot.on('message', async (msg) => {
   
         const fileName = `voice_${msg.voice.file_id}.mp3`;
         
-        discordChannel.send({
-          content: messageText,
-          files: [{
-            attachment: outputStream,
-            name: fileName
-          }]
+        discordChannel.send({ content: messageText, files: [{ attachment: outputStream, name: fileName}]
         });
       });
-    } else if(msg.sticker) { 
-      try {
-        const fileLink = await telegramBot.getFileLink(msg.sticker.file_id);
-      
-        https.get(fileLink, async (response) => {
-          const inputStream = new PassThrough();
-          response.pipe(inputStream);
-      
-          const chunks = [];
-          const ffmpegProcess = ffmpeg(inputStream)
-            .outputFormat('apng') // Или 'webp' для анимированных
-            .on('error', (err) => {
-              console.error('❌ Ошибка при конвертации:', err.message);
-            })
-            .on('end', async () => {
-              const buffer = Buffer.concat(chunks);
-      
-              // if (buffer.length > 512 * 1024) {
-              //   console.error(`❌ Стикер слишком большой: ${(buffer.length / 1024).toFixed(1)} KB`);
-              //   return;
-              // }
-      
-              try {
-                const guild = discordChannel.guild;
-      
-                const sticker = await guild.stickers.create({
-                  name: `sticker_${msg.sticker.file_unique_id.slice(0, 24)}`,
-                  description: 'Стикер из Telegram',
-                  tags: '💬',
-                  file: {
-                    attachment: buffer,
-                    name: 'sticker.png'
-                  }
-                });
-      
-                console.log('🎉 Стикер добавлен:', sticker.url);
-      
-                // 🟢 Отправляем в канал
-                await discordChannel.send({ stickers: [sticker.id] });
-                console.log('📤 Стикер отправлен в чат');
-      
-                // ⏳ Удаляем через 5 секунд
-                setTimeout(() => {
-                  sticker.delete()
-                    .then(() => console.log('🗑 Стикер удалён с сервера'))
-                    .catch(err => console.error('⚠ Ошибка при удалении стикера:', err.message));
-                }, 5000);
-      
-              } catch (err) {
-                console.error('❌ Ошибка при добавлении стикера:', err.message);
-              }
-            })
-            .pipe();
-      
-          ffmpegProcess.on('data', chunk => chunks.push(chunk));
-        });
-      } catch (err) {
-        console.error('❌ Ошибка обработки стикера:', err.message);
-      }
-    } else {
-      discordChannel.send({
-        content: messageText,
-        files: [fileLink]
+      return;
+    } else if (msg.sticker) { // sticker
+      const fileLink = await telegramBot.getFileLink(msg.sticker.file_id);
+    
+      https.get(fileLink, async response => {
+        const input = new PassThrough();
+        response.pipe(input);
+
+        const chunks = [];
+        
+        // WEBM covert to APNG
+        ffmpeg(input)
+          .outputFormat('apng')
+          .on('end', async () => {
+            const apngBuffer = Buffer.concat(chunks);
+            const guild = discordChannel.guild;
+    
+            if (apngBuffer.length <= 512 * 1024) {
+              // APNG send to Discord
+              const sticker = await guild.stickers.create({
+                name: `sticker_${msg.sticker.file_unique_id.slice(0, 24)}`,
+                description: 'Sticker Telegram',
+                tags: '💬',
+                file: { content: messageText, attachment: apngBuffer, name: 'sticker.apng' }
+              });
+              await discordChannel.send({ content: messageText, stickers: [sticker.id] });
+              setTimeout(() => sticker.delete(), 5000);
+            } else {
+              // If the APNG is too big, convert it to GIF.
+              const gifChunks = [];
+              const bufStream = new PassThrough();
+              bufStream.end(apngBuffer);
+    
+              await new Promise((resolve, reject) => {
+                ffmpeg(bufStream)
+                  .outputFormat('gif')
+                  .outputOptions([
+                    '-vf', 'scale=160:160:flags=lanczos',
+                    '-f', 'gif'
+                  ])
+                  .on('end', resolve)
+                  .pipe()
+                  .on('data', c => gifChunks.push(c));
+              });
+    
+              const gifBuffer = Buffer.concat(gifChunks);
+                await discordChannel.send({ files: [{ content: messageText, attachment: gifBuffer, name: 'sticker.gif' }] });
+            }
+          })
+          .pipe()
+          .on('data', chunk => chunks.push(chunk));
       });
+      return;
     }
-  }
-});
+
+    discordChannel.send({
+      content: messageText,
+      files: [fileLink] });
+    }
+  });
 
 
 
