@@ -1,0 +1,6 @@
+@discordjs/rest
+@discordjs/builders
+discord.js
+node-telegram-bot-api
+fluent-ffmpeg
+axios

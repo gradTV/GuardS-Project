@@ -130,14 +130,11 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-
-
-const ffmpeg = require('fluent-ffmpeg');
 const { exec } = require('child_process');
 
 
-
-
+const telegramToDiscordMap = new Map();
+const discordToTelegramMap = new Map();
 
 // Discord-to-Telegram message relay with support for replies and media.
 client.on('messageCreate', async (message) => {
@@ -147,13 +144,52 @@ client.on('messageCreate', async (message) => {
   const telegramChatId = channelMappings[channelId];
 
   if (telegramChatId) {
-    let messageContent = `[${message.member.nickname}] ${message.content}`;
-    
+    let messageContent = `${message.member.nickname}\n ${message.content}`;
+    let sentTelegramMessage;
+    const telegramOptions = {};
+
     // Check if the message is a reply
-    if (message.reference) {
-      const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
-      const repliedMessageContent = `[${repliedMessage.author.globalName}] ${repliedMessage.content}`;
-      messageContent = `\n> ${repliedMessageContent}: \n${messageContent}`;
+    if (message.reference && message.reference.messageId) {
+      // Пытаемся найти оригинальное сообщение в Telegram
+      const originalTelegramMessageId = discordToTelegramMap.get(message.reference.messageId);
+      if (originalTelegramMessageId) {
+        // Устанавливаем ID для ответа в Telegram
+        telegramOptions.reply_to_message_id = originalTelegramMessageId;
+      } else {
+        // Если не нашли - добавляем цитату в текст
+        const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
+        const repliedMessageAuthor = repliedMessage.member?.nickname || repliedMessage.author.username;
+        messageContent = `> [${repliedMessageAuthor}] ${repliedMessage.content}\n\n${messageContent}`;
+      }
+    }
+
+    // Обработка вложений (фото, видео и т.д.)
+    if (message.attachments.size > 0) {
+      const attachments = Array.from(message.attachments.values());
+      
+      // Для первого вложения добавляем основной текст как подпись
+      for (const attachment of attachments) {
+        const caption = attachments.length === 1 ? messageContent : null;
+        if (caption) telegramOptions.caption = caption;
+        
+        // Сохраняем связь ID только для первого вложения
+        if (attachment === attachments[0] && sentTelegramMessage) {
+          discordToTelegramMap.set(message.id, sentTelegramMessage.message_id);
+          telegramToDiscordMap.set(sentTelegramMessage.message_id, message.id);
+        }
+      }
+
+      // Если несколько файлов - отправляем текст отдельным сообщением
+      const standaloneText = messageContent.replace(`[${message.member?.nickname || message.author.username}] `, '').trim();
+      if (attachments.length > 1 && standaloneText) {
+        await telegramBot.sendMessage(telegramChatId, `${message.member?.nickname || message.author.username} ${standaloneText}`);
+      }
+    } else if (message.content) {
+      // Отправка обычного текстового сообщения
+      sentTelegramMessage = await telegramBot.sendMessage(telegramChatId, messageContent, telegramOptions);
+      // Сохраняем связь ID сообщений
+      discordToTelegramMap.set(message.id, sentTelegramMessage.message_id);
+      telegramToDiscordMap.set(sentTelegramMessage.message_id, message.id);
     }
 
     // Send message Discord-to-Telegram
@@ -172,7 +208,7 @@ client.on('messageCreate', async (message) => {
                 const mediaBuffer = Buffer.concat(chunks);
                 const isGIF = fileLink.toLowerCase().endsWith('.gif');
                 if (isGIF) {
-                  telegramBot.sendAnimation(telegramChatId, mediaBuffer, { caption: messageContent });
+                  telegramBot.sendAnimation(telegramChatId, mediaBuffer, { caption: messageContent, ...telegramOptions});
                 }
               });
             });
@@ -187,7 +223,7 @@ client.on('messageCreate', async (message) => {
               });
               response.on('end', async () => {
                 mediaBuffer = Buffer.concat(chunks);
-                telegramBot.sendPhoto(telegramChatId, mediaBuffer, { caption: messageContent });
+                telegramBot.sendPhoto(telegramChatId, mediaBuffer, { caption: messageContent, ...telegramOptions});
               });
             });
           } else if (/\.(mp4|mov)$/i.test(filePath)) {
@@ -198,28 +234,25 @@ client.on('messageCreate', async (message) => {
               });
               response.on('end', async () => {
                 mediaBuffer = Buffer.concat(chunks);
-                telegramBot.sendVideo(telegramChatId, mediaBuffer, { caption: messageContent });
+                telegramBot.sendVideo(telegramChatId, mediaBuffer, { caption: messageContent, ...telegramOptions });
               });
             });
           } else {
             // Send Document
-            telegramBot.sendDocument(telegramChatId, fileLink, { caption: messageContent });
+            telegramBot.sendDocument(telegramChatId, fileLink, { caption: messageContent, ...telegramOptions });
           }
         });
-      } else {
-        telegramBot.sendMessage(telegramChatId, messageContent);
       }
     }
   }
 });
 
-
+const ffmpeg = require('fluent-ffmpeg');
 const tmp = require('tmp');
 
 // Telegram to Discord
 telegramBot.on('message', async (msg) => {
   
-  const messageText = `**${msg.from.first_name}**`;
   const discordChannelId = Object.keys(channelMappings).find(
     (channelId) => channelMappings[channelId] === msg.chat.id.toString()
   );
@@ -228,6 +261,36 @@ telegramBot.on('message', async (msg) => {
 
   const discordChannel = client.channels.cache.get(discordChannelId);
   if (!discordChannel) return;
+
+  const messageText = `**${msg.from.first_name}**`;
+  // Формируем текст с именем отправителя
+  let fullMessageContent = msg.text ? `${messageText}: ${msg.text}` : messageText;
+
+  const discordOptions = {};
+
+  // Обработка ответов в Telegram
+  if (msg.reply_to_message && msg.reply_to_message.message_id) {
+    // Пытаемся найти оригинальное сообщение в Discord
+    const originalDiscordMessageId = telegramToDiscordMap.get(msg.reply_to_message.message_id);
+    if (originalDiscordMessageId) {
+      // Устанавливаем ответ в Discord
+      const originalDiscordMessage = await discordChannel.messages.fetch(originalDiscordMessageId);
+      discordOptions.reply = { messageReference: originalDiscordMessage };
+    } else {
+      // Добавляем цитату в текст, если не нашли оригинал
+      const repliedContent = msg.reply_to_message.text || msg.reply_to_message.caption || '';
+      const shortText = repliedContent.substring(0, 47) + (repliedContent.length > 50 ? '...' : '');
+      fullMessageContent = `> ${msg.reply_to_message.from.first_name}: ${shortText}\n\n${fullMessageContent}`;
+    }
+
+    const sentDiscordMessage = await discordChannel.send({
+      content: fullMessageContent,
+      ...discordOptions
+    });
+
+    telegramToDiscordMap.set(msg.message_id, sentDiscordMessage.id);
+    discordToTelegramMap.set(sentDiscordMessage.id, msg.message_id);
+  }
 
   if (msg.photo || msg.video || msg.audio || msg.animation || msg.voice || msg.sticker ) {
     let fileLink = '';
@@ -246,20 +309,19 @@ telegramBot.on('message', async (msg) => {
       https.get(fileLink, (response) => {
         const inputStream = new PassThrough();
         response.pipe(inputStream);
-  
+
         const outputStream = new PassThrough();
-  
+
         ffmpeg(inputStream)
           .toFormat('mp3')
           .on('error', (err) => {
             console.error('Error: Convertation', err);
           })
           .pipe(outputStream);
-  
+
         const fileName = `voice_${msg.voice.file_id}.mp3`;
-        
-        discordChannel.send({ content: messageText, files: [{ attachment: outputStream, name: fileName}]
-        });
+
+        discordChannel.send({ content: messageText, files: [{ attachment: outputStream, name: fileName}] });
       });
       return;
     } else if (msg.sticker) { // sticker
@@ -277,7 +339,7 @@ telegramBot.on('message', async (msg) => {
           .on('end', async () => {
             const apngBuffer = Buffer.concat(chunks);
             const guild = discordChannel.guild;
-    
+
             if (apngBuffer.length <= 512 * 1024) {
               // APNG send to Discord
               const sticker = await guild.stickers.create({
@@ -293,7 +355,7 @@ telegramBot.on('message', async (msg) => {
               const gifChunks = [];
               const bufStream = new PassThrough();
               bufStream.end(apngBuffer);
-    
+
               await new Promise((resolve, reject) => {
                 ffmpeg(bufStream)
                   .outputFormat('gif')
@@ -305,9 +367,9 @@ telegramBot.on('message', async (msg) => {
                   .pipe()
                   .on('data', c => gifChunks.push(c));
               });
-    
+
               const gifBuffer = Buffer.concat(gifChunks);
-                await discordChannel.send({ files: [{ content: messageText, attachment: gifBuffer, name: 'sticker.gif' }] });
+              await discordChannel.send({ files: [{ content: messageText, attachment: gifBuffer, name: 'sticker.gif' }] });
             }
           })
           .pipe()
@@ -319,8 +381,9 @@ telegramBot.on('message', async (msg) => {
     discordChannel.send({
       content: messageText,
       files: [fileLink] });
-    }
-  });
+  }
+});
+
 
 
 
