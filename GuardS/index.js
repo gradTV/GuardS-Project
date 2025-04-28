@@ -144,52 +144,22 @@ client.on('messageCreate', async (message) => {
   const telegramChatId = channelMappings[channelId];
 
   if (telegramChatId) {
-    let messageContent = `${message.member.nickname}\n ${message.content}`;
+    let messageContent = `[${message.member.nickname}]\n${message.content}`;
     let sentTelegramMessage;
     const telegramOptions = {};
 
+    // UserName
+    const standaloneText = messageContent
+      .replace(`[${message.member?.nickname || message.author.username}] `, '')
+      .trim();
+
     // Check if the message is a reply
     if (message.reference && message.reference.messageId) {
-      // Пытаемся найти оригинальное сообщение в Telegram
-      const originalTelegramMessageId = discordToTelegramMap.get(message.reference.messageId);
-      if (originalTelegramMessageId) {
-        // Устанавливаем ID для ответа в Telegram
-        telegramOptions.reply_to_message_id = originalTelegramMessageId;
-      } else {
-        // Если не нашли - добавляем цитату в текст
-        const repliedMessage = await message.channel.messages.fetch(message.reference.messageId);
-        const repliedMessageAuthor = repliedMessage.member?.nickname || repliedMessage.author.username;
-        messageContent = `> [${repliedMessageAuthor}] ${repliedMessage.content}\n\n${messageContent}`;
+      const TgMessageId = discordToTelegramMap.get(message.reference.messageId);
+      if (TgMessageId) {
+        // Set the reply ID for Telegram
+        telegramOptions.reply_to_message_id = TgMessageId;
       }
-    }
-
-    // Обработка вложений (фото, видео и т.д.)
-    if (message.attachments.size > 0) {
-      const attachments = Array.from(message.attachments.values());
-      
-      // Для первого вложения добавляем основной текст как подпись
-      for (const attachment of attachments) {
-        const caption = attachments.length === 1 ? messageContent : null;
-        if (caption) telegramOptions.caption = caption;
-        
-        // Сохраняем связь ID только для первого вложения
-        if (attachment === attachments[0] && sentTelegramMessage) {
-          discordToTelegramMap.set(message.id, sentTelegramMessage.message_id);
-          telegramToDiscordMap.set(sentTelegramMessage.message_id, message.id);
-        }
-      }
-
-      // Если несколько файлов - отправляем текст отдельным сообщением
-      const standaloneText = messageContent.replace(`[${message.member?.nickname || message.author.username}] `, '').trim();
-      if (attachments.length > 1 && standaloneText) {
-        await telegramBot.sendMessage(telegramChatId, `${message.member?.nickname || message.author.username} ${standaloneText}`);
-      }
-    } else if (message.content) {
-      // Отправка обычного текстового сообщения
-      sentTelegramMessage = await telegramBot.sendMessage(telegramChatId, messageContent, telegramOptions);
-      // Сохраняем связь ID сообщений
-      discordToTelegramMap.set(message.id, sentTelegramMessage.message_id);
-      telegramToDiscordMap.set(sentTelegramMessage.message_id, message.id);
     }
 
     // Send message Discord-to-Telegram
@@ -198,61 +168,85 @@ client.on('messageCreate', async (message) => {
         message.attachments.forEach(async (attachment) => {
           const fileLink = attachment.url;
           let mediaBuffer;
-          if (/\.(gif)$/i.test(fileLink)) {
-            https.get(fileLink, async (response) => {
+          const filePath = new URL(fileLink).pathname;
+
+          // Send GIF
+          if (/\.(gif|)$/i.test(fileLink)) {
+            https.get(fileLink, (response) => {
               const chunks = [];
-              response.on('data', (chunk) => {
-                chunks.push(chunk);
-              });
+              response.on('data', (chunk) => chunks.push(chunk));
               response.on('end', async () => {
-                const mediaBuffer = Buffer.concat(chunks);
-                const isGIF = fileLink.toLowerCase().endsWith('.gif');
-                if (isGIF) {
-                  telegramBot.sendAnimation(telegramChatId, mediaBuffer, { caption: messageContent, ...telegramOptions});
-                }
+                mediaBuffer = Buffer.concat(chunks);
+                const sent = await telegramBot.sendAnimation(
+                  telegramChatId,
+                  mediaBuffer,
+                  { caption: messageContent, ...telegramOptions }
+                );
+                discordToTelegramMap.set(message.id, sent.message_id);
+                telegramToDiscordMap.set(sent.message_id, message.id);
               });
             });
           }
-          // Send file as URL
-          const filePath = new URL(fileLink).pathname;
-          if (/\.(jpg|jpeg|png)$/i.test(filePath)) {
-            https.get(fileLink, async (response) => {
+          // Send photo
+          else if (/\.(jpg|jpeg|png)$/i.test(filePath)) {
+            https.get(fileLink, (response) => {
               const chunks = [];
-              response.on('data', (chunk) => {
-                chunks.push(chunk);
-              });
+              response.on('data', (chunk) => chunks.push(chunk));
               response.on('end', async () => {
                 mediaBuffer = Buffer.concat(chunks);
-                telegramBot.sendPhoto(telegramChatId, mediaBuffer, { caption: messageContent, ...telegramOptions});
+                const sent = await telegramBot.sendPhoto(
+                  telegramChatId,
+                  mediaBuffer,
+                  { caption: messageContent, ...telegramOptions }
+                );
+                discordToTelegramMap.set(message.id, sent.message_id);
+                telegramToDiscordMap.set(sent.message_id, message.id);
               });
             });
-          } else if (/\.(mp4|mov)$/i.test(filePath)) {
-            https.get(fileLink, async (response) => {
+          // Send video
+          } else if (/\.(mp4|mov|webm)$/i.test(filePath)) {
+            https.get(fileLink, (response) => {
               const chunks = [];
-              response.on('data', (chunk) => {
-                chunks.push(chunk);
-              });
+              response.on('data', (chunk) => chunks.push(chunk));
               response.on('end', async () => {
                 mediaBuffer = Buffer.concat(chunks);
-                telegramBot.sendVideo(telegramChatId, mediaBuffer, { caption: messageContent, ...telegramOptions });
+                const sent = await telegramBot.sendVideo(
+                  telegramChatId,
+                  mediaBuffer,
+                  { caption: messageContent, ...telegramOptions }
+                );
+                discordToTelegramMap.set(message.id, sent.message_id);
+                telegramToDiscordMap.set(sent.message_id, message.id);
               });
             });
           } else {
-            // Send Document
-            telegramBot.sendDocument(telegramChatId, fileLink, { caption: messageContent, ...telegramOptions });
+            // Send document
+            const sent = await telegramBot.sendDocument(
+              telegramChatId,
+              fileLink,
+              { caption: messageContent, ...telegramOptions }
+            );
+            discordToTelegramMap.set(message.id, sent.message_id);
+            telegramToDiscordMap.set(sent.message_id, message.id);
           }
         });
+      } else {
+        // Send reply text
+        sentTelegramMessage = await telegramBot.sendMessage( telegramChatId, messageContent, telegramOptions
+        );
+        discordToTelegramMap.set(message.id, sentTelegramMessage.message_id);
+        telegramToDiscordMap.set(sentTelegramMessage.message_id, message.id);
       }
     }
   }
 });
+
 
 const ffmpeg = require('fluent-ffmpeg');
 const tmp = require('tmp');
 
 // Telegram to Discord
 telegramBot.on('message', async (msg) => {
-  
   const discordChannelId = Object.keys(channelMappings).find(
     (channelId) => channelMappings[channelId] === msg.chat.id.toString()
   );
@@ -263,28 +257,27 @@ telegramBot.on('message', async (msg) => {
   if (!discordChannel) return;
 
   const messageText = `**${msg.from.first_name}**`;
-  // Формируем текст с именем отправителя
-  let fullMessageContent = msg.text ? `${messageText}: ${msg.text}` : messageText;
+  // UserName
+  let MessageContent = msg.text ? `${messageText}: ${msg.text}` : messageText;
 
   const discordOptions = {};
 
-  // Обработка ответов в Telegram
+    // Send message Telegram-to-Discord
   if (msg.reply_to_message && msg.reply_to_message.message_id) {
-    // Пытаемся найти оригинальное сообщение в Discord
-    const originalDiscordMessageId = telegramToDiscordMap.get(msg.reply_to_message.message_id);
-    if (originalDiscordMessageId) {
-      // Устанавливаем ответ в Discord
-      const originalDiscordMessage = await discordChannel.messages.fetch(originalDiscordMessageId);
-      discordOptions.reply = { messageReference: originalDiscordMessage };
+    const DsMessageId = telegramToDiscordMap.get(msg.reply_to_message.message_id);
+    if (DsMessageId) {
+      // Add reply on text
+      const originMessage = await discordChannel.messages.fetch(DsMessageId);
+      discordOptions.reply = { messageReference: originMessage };
     } else {
-      // Добавляем цитату в текст, если не нашли оригинал
+      //
       const repliedContent = msg.reply_to_message.text || msg.reply_to_message.caption || '';
       const shortText = repliedContent.substring(0, 47) + (repliedContent.length > 50 ? '...' : '');
-      fullMessageContent = `> ${msg.reply_to_message.from.first_name}: ${shortText}\n\n${fullMessageContent}`;
+      MessageContent = `> ${msg.reply_to_message.from.first_name}: ${shortText}\n\n${MessageContent}`;
     }
 
     const sentDiscordMessage = await discordChannel.send({
-      content: fullMessageContent,
+      content: MessageContent,
       ...discordOptions
     });
 
@@ -383,59 +376,6 @@ telegramBot.on('message', async (msg) => {
       files: [fileLink] });
   }
 });
-
-
-
-
-
-telegramBot.on('message', (msg) => {
-  const discordChannelId = Object.keys(channelMappings).find(
-    (channelId) => channelMappings[channelId] === msg.chat.id.toString()
-  );
-
-  if (discordChannelId && msg.text) {
-    const discordChannel = client.channels.cache.get(discordChannelId);
-    if (discordChannel) {
-      let messageContent = '';
-  
-      // Проверяем, определен ли объект msg.from и его свойство username
-      if (msg.from && msg.from.username) {
-        messageContent = `**${msg.from.first_name || 'Аноним'} ${msg.from.last_name || ''}:**\n`;
-      } else {
-        // Если у пользователя нет username, используем его имя и фамилию
-        messageContent = `**${msg.from.first_name || 'Аноним'} ${msg.from.last_name || ''}:**\n`;
-      }
-
-      // Добавляем основное сообщение
-      messageContent += `> ${msg.text}\n`;
-
-      // Если сообщение было переслано, добавляем информацию о пересылке и оригинальное сообщение
-      if (msg.forward_from || (msg.reply_to_message && msg.reply_to_message.from)) {
-        let forwardedFrom = '';
-
-        // Проверяем, определен ли объект msg.forward_from и его свойство username
-        if (msg.forward_from && msg.forward_from.username) {
-          forwardedFrom = `${msg.forward_from.first_name || 'Аноним'} ${msg.forward_from.last_name || ''}`;
-        } else if (msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.username) {
-          forwardedFrom = `${msg.reply_to_message.from.first_name || 'Аноним'} ${msg.reply_to_message.from.last_name || ''}`;
-        } else if (msg.forward_from && msg.forward_from.first_name) {
-          // Если у пользователя нет username, используем его имя и фамилию
-          forwardedFrom = `${msg.forward_from.first_name} ${msg.forward_from.last_name || ''}`;
-        } else if (msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.first_name) {
-          // Если у пользователя нет username, используем его имя и фамилию
-          forwardedFrom = `${msg.reply_to_message.from.first_name} ${msg.reply_to_message.from.last_name || ''}`;
-        }
-
-        // Если есть информация о том, от кого переслано
-        if (forwardedFrom) {
-          messageContent += `> ${forwardedFrom}: ${msg.reply_to_message.text}`;
-        }
-      }
-
-      discordChannel.send(messageContent);
-    }
-  }
-})
 
 const storageUser = {}; // Storage for temporary user data
 const saveID = {}; // Storage for saved IDs
