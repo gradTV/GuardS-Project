@@ -4,3 +4,4 @@ discord.js
 node-telegram-bot-api
 fluent-ffmpeg
 axios
+tmp
