@@ -26,7 +26,12 @@ config = require('./config.json');
 
 const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
+const { exec } = require('child_process');
 
+const { roleChanger } = require('./discord/roleChanger');
+roleChanger.init(client);
+
+// const { emoji } = require('./discord/emoji');
 
 const discordToken = config.tokenDS;
 const telegramToken = config.tokenTG;
@@ -95,7 +100,7 @@ const rest = new REST({ version: '10' }).setToken(discordToken);
 
 const telegramBot = new TelegramBot(telegramToken, { polling: true });
 
-//ДИСКОРД СОЕДИНЕНИЕ
+//Discord link to Telegram
 const channelMappings = {};
 
 client.on('interactionCreate', async (interaction) => {
@@ -108,7 +113,7 @@ client.on('interactionCreate', async (interaction) => {
     const telegramChatId = interaction.options.getString('telegram');
 
     if (!discordChannel || !telegramChatId) {
-      return interaction.reply('Ошибка: необходимо указать канал Discord и ID чата Telegram.');
+      return interaction.reply('Error: необходимо указать канал Discord и ID чата Telegram.');
     }
 
     // Удаляем предыдущее соединение, если оно есть
@@ -130,9 +135,6 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-const { exec } = require('child_process');
-
-
 const telegramToDiscordMap = new Map();
 const discordToTelegramMap = new Map();
 
@@ -144,12 +146,12 @@ client.on('messageCreate', async (message) => {
   const telegramChatId = channelMappings[channelId];
 
   if (telegramChatId) {
-    let messageContent = `${message.member.nickname}\n ${message.content}`;
+    let messageContent = `[${message.member.displayName}]\n ${message.content}`;
     let sentTelegramMessage;
     const telegramOptions = {};
 
     // Check if the message is a reply
-    if (message.reference && message.reference.messageId) {
+    if (message.reference && message.member?.messageId) {
       // Пытаемся найти оригинальное сообщение в Telegram
       const originalTelegramMessageId = discordToTelegramMap.get(message.reference.messageId);
       if (originalTelegramMessageId) {
@@ -250,7 +252,7 @@ client.on('messageCreate', async (message) => {
 const ffmpeg = require('fluent-ffmpeg');
 const tmp = require('tmp');
 
-// Telegram to Discord
+// Telegram to Discord message relay with support for replies and media.
 telegramBot.on('message', async (msg) => {
   
   const discordChannelId = Object.keys(channelMappings).find(
@@ -384,10 +386,6 @@ telegramBot.on('message', async (msg) => {
   }
 });
 
-
-
-
-
 telegramBot.on('message', (msg) => {
   const discordChannelId = Object.keys(channelMappings).find(
     (channelId) => channelMappings[channelId] === msg.chat.id.toString()
@@ -400,10 +398,10 @@ telegramBot.on('message', (msg) => {
   
       // Проверяем, определен ли объект msg.from и его свойство username
       if (msg.from && msg.from.username) {
-        messageContent = `**${msg.from.first_name || 'Аноним'} ${msg.from.last_name || ''}:**\n`;
+        messageContent = `**${msg.from.first_name || 'Anonim'} ${msg.from.last_name || ''}:**\n`;
       } else {
         // Если у пользователя нет username, используем его имя и фамилию
-        messageContent = `**${msg.from.first_name || 'Аноним'} ${msg.from.last_name || ''}:**\n`;
+        messageContent = `**${msg.from.first_name || 'Anonim'} ${msg.from.last_name || ''}:**\n`;
       }
 
       // Добавляем основное сообщение
@@ -415,9 +413,9 @@ telegramBot.on('message', (msg) => {
 
         // Проверяем, определен ли объект msg.forward_from и его свойство username
         if (msg.forward_from && msg.forward_from.username) {
-          forwardedFrom = `${msg.forward_from.first_name || 'Аноним'} ${msg.forward_from.last_name || ''}`;
+          forwardedFrom = `${msg.forward_from.first_name || 'Anonim'} ${msg.forward_from.last_name || ''}`;
         } else if (msg.reply_to_message && msg.reply_to_message.from && msg.reply_to_message.from.username) {
-          forwardedFrom = `${msg.reply_to_message.from.first_name || 'Аноним'} ${msg.reply_to_message.from.last_name || ''}`;
+          forwardedFrom = `${msg.reply_to_message.from.first_name || 'Anonim'} ${msg.reply_to_message.from.last_name || ''}`;
         } else if (msg.forward_from && msg.forward_from.first_name) {
           // Если у пользователя нет username, используем его имя и фамилию
           forwardedFrom = `${msg.forward_from.first_name} ${msg.forward_from.last_name || ''}`;
@@ -610,7 +608,7 @@ telegramBot.on('callback_query', async (callbackQuery) => {
 // ID input handler
 telegramBot.on('message', async (msg) => {
   const chatId = msg.chat.id;
-  const messageId = msg.message_id; // Получаем ID сообщения пользователя
+  const messageId = msg.message_id; // get ID user
   const text = msg.text;
   
   if (!storageUser[chatId]?.awaiting) return;
@@ -680,61 +678,6 @@ telegramBot.onText(/\/id/, (msg) => {
 });
 
 
-
-telegramBot.onText(/\/button/, (msg) => {
-  const chatId = msg.chat.id;
-
-  const inlineKeyboard = [
-    [{ text: 'Нажми меня', callback_data: 'button_pressed' }]
-  ];
-
-  const opts = {
-    reply_markup: {
-      inline_keyboard: inlineKeyboard,
-    }
-  };
-
-  telegramBot.sendMessage(chatId, 'Узнать ID:', opts);
-});
-
-telegramBot.on('callback_query', (query) => {
-  if (query.data === 'button_pressed') {
-    const chatId = query.message.chat.id;
-    telegramBot.sendMessage(chatId, 'Кнопка была нажата!');
-  }
-});
-
-  //RoleChanger
-  client.on('messageCreate', message => {
-    const roleIds = ['1078503876375892111', '1078503892922404975', '1078503890619732008']; // менять роли
-    let intervalId;
-    
-    function changeRole() {
-      const member = message.guild.members.cache.get(message.author.id);
-      if (!member) {
-        console.error('Member not found');
-        return;
-      }
-      const randomRole = roleIds[Math.floor(Math.random() * roleIds.length)];
-      const role = message.guild.roles.cache.get(randomRole);
-      member.roles.set([role]).catch(console.error);
-    }
-    
-    if (message.content === '!changerole') {
-      intervalId = setInterval(changeRole, 5000); 
-      message.channel.send('Роль будет меняться каждые 5 секунды!');
-    } else if (message.content === '!stopchangerole') {
-      if (intervalId) {
-        clearInterval(intervalId);
-        intervalId = null;
-        message.channel.send('Смена ролей остановлена!');
-      } else {
-        message.channel.send('Смена ролей уже остановлена!');
-      }
-    }
-  })
-
-
 // Хранилище для сообщений (лучше использовать базу данных в реальном проекте)
 const messageStore = new Map();
 
@@ -763,7 +706,7 @@ client.on('interactionCreate', async interaction => {
         flags: 64
       });
     } catch (error) {
-        console.error('Ошибка при отправке сообщения:', error);
+        console.error('Error при отправке сообщения:', error);
         await interaction.reply({
           content: '❌ Не удалось отправить сообщение. Проверь правильность ID.',
           flags: 64
@@ -798,12 +741,12 @@ client.on('interactionCreate', async interaction => {
       global.messageLinks.set(senderID, interaction.user.id);
 
       await interaction.reply({
-        content: "✅ Ответ отправлен!",
+        content: "✅ Send!",
         flags: 64
       });
     } catch (error) {
       await interaction.reply({
-        content: `❌ Ошибка: ${error.message}`,
+        content: `❌ Error: ${error.message}`,
         flags: 64
       });
     }

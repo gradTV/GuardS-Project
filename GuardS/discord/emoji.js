@@ -1,12 +1,15 @@
-const { Client, Intents } = require('discord.js');
-const client = new Client({ intents: [Intents.FLAGS.GUILDS, Intents.FLAGS.GUILD_MESSAGES] });
+const { Client, GatewayIntentBits } = require('discord.js');
+const client = new Client({ intents: [
+  GatewayIntentBits.Guilds,
+  GatewayIntentBits.GuildMessages,
+  GatewayIntentBits.MessageContent]
+});
 
-config = require('../config.json');
+const config = require('../config.json');
 const token = config.token;
 
 exports.run = async (emojiName, stickerId, action, message) => {
     try {
-        await client.login(token);
 
         client.on('ready', () => {
             console.log(`Logged in as ${client.user.tag}!`);
@@ -34,3 +37,4 @@ exports.run = async (emojiName, stickerId, action, message) => {
         console.error('Error managing emoji or sticker:', error);
     }
 };
+client.login(token);
